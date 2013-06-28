@@ -7,7 +7,7 @@ using namespace tiger_cat;
 
 int main(int argc, char* argv[])
 {
-	std::ifstream ifs("test1.tc");
+	std::ifstream ifs("test2.tc");
 	std::string code(
 		(std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 	TigerCat tiger_cat(code);
