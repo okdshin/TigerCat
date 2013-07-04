@@ -7,6 +7,9 @@ PROGRAM = TigerCat.out
 
 all:$(PROGRAM)
 
+release:CXXFLAGS += -DRELEASE_MODE
+release:$(PROGRAM)
+
 $(PROGRAM): $(OBJS)
 	$(CXX) $(CXXFLAGS) $^ $(INCLUDES) $(LIBS) -o $(PROGRAM)
 

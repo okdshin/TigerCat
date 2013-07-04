@@ -1,5 +1,6 @@
 #pragma once
 //TigerCat:20130624
+//#define SEMANTIA_BASIC_TREE_WALKER_DEBUG_ON
 //#define PARSIA_TOKEN_BUFFER_DEBUG_ON
 //#define LEXIA_LEXER_DEBUG_ON
 #include <iostream>
@@ -108,7 +109,7 @@ public:
 
 	auto Define() -> void {
 		DefineLanguageSyntax();
-		DefineTreePattern();
+		DefineTreePatternForSymbolTable();
 	}
 
 	auto InitLanguageTokenBuffer() -> void {
@@ -132,29 +133,19 @@ public:
 	}
 
 	auto MakeAbstractSyntaxTree() -> const Ast::Ptr {
-		try{
-			ast_root_ = language_parser_.ProcessRule("program");
-		}
-		catch(const parsia::SyntaxError& e){
-			std::cout << e.what() << std::endl;
-		}
+		ast_root_ = language_parser_.ProcessRule("program");
 		return ast_root_;
 	}
 
 	auto MakeSymbolTable() -> void {
 		const auto global_scope = symbolia::GlobalScope::Create();
 		symbol_table_.PushScope(global_scope);
-		try{
-			ast_parser_.ProcessRule("pattern");	
-		}
-		catch(const parsia::SyntaxError& e){
-			std::cout << e.what() << std::endl;
-		}
+		ast_parser_.ProcessRule("pattern");	
 	}
 
 private:
 	using LanguageParser = parsia::BasicParser<Ast::Ptr>;
-	using AstParser = parsia::BasicParser<Ast::Ptr>;
+	using AstParser = parsia::BasicParser<void*>;
 
 	lexia::Lexer lexer_;
 	LanguageParser language_parser_;
@@ -164,12 +155,12 @@ private:
 	symbolia::SymbolTable symbol_table_;
 
 private:
-	auto DefineTreePattern() -> void {
+	auto DefineTreePatternForSymbolTable() -> void {
 		ast_parser_.DefineSyntaxRule("pattern")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				Match(buffer, lexia::TokenType::VARIABLE_REFERENCE());
 				Match(buffer, semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				const auto var_token = 
@@ -181,12 +172,12 @@ private:
 					std::cout << symbolia::SymbolTable::Resolve(symbol_table_, SymboliaWord(var_token.GetWord())) << std::endl;
 				}
 				processor("pattern");
-				return Ast::Ptr();
+				return nullptr;
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				Match(buffer, lexia::TokenType::VARIABLE_DECLARATION());
 				Match(buffer, semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				Match(buffer, lexia::TokenType::INT());
@@ -203,12 +194,12 @@ private:
 					symbolia::SymbolTable::Define(symbol_table_, variable_symbol);
 				}
 				processor("pattern");
-				return Ast::Ptr();
+				return nullptr;
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				Match(buffer, lexia::TokenType::FUNCTION_DECLARATION());
 				Match(buffer, semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				Match(buffer, lexia::TokenType::CONS());
@@ -260,12 +251,12 @@ private:
 					Match(buffer, lexia::TokenType::CONS());
 				}
 				processor("pattern");
-				return Ast::Ptr();
+				return nullptr;
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				Match(buffer, semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				Match(buffer, lexia::TokenType::BLOCK());
 				Match(buffer, semantia::TokenType::STEP_UP_TOKEN_TYPE());
@@ -273,12 +264,12 @@ private:
 					std::cout << "##empty block!!" << std::endl;
 				}
 				processor("pattern");
-				return Ast::Ptr();
+				return nullptr;
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				Match(buffer, semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				Match(buffer, lexia::TokenType::BLOCK());
 				if(!buffer->IsSpeculating()){
@@ -289,15 +280,15 @@ private:
 					symbolia::SymbolTable::DebugPrint(symbol_table_);
 				}
 				processor("pattern");
-				return Ast::Ptr();
+				return nullptr;
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				if(buffer->LookAheadTokenType(1)
 						== semantia::TokenType::SEMANTIA_EOF_TOKEN_TYPE()){
-					return Ast::Ptr();
+					return nullptr;
 				}else{
 					Match(buffer, lexia::TokenType::BLOCK());
 					Match(buffer, semantia::TokenType::STEP_UP_TOKEN_TYPE());
@@ -307,23 +298,23 @@ private:
 						symbolia::SymbolTable::DebugPrint(symbol_table_);
 					}
 					processor("pattern");
-					return Ast::Ptr();
+					return nullptr;
 				}
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					const parsia::TokenBuffer::Ptr& buffer,
 					const AstParser::SyntaxRule::RuleProcessor& processor
-					) -> Ast::Ptr {
+					) -> void* {
 				if(!buffer->IsSpeculating()){
 					//std::cout << "pass token" << std::endl;
 				}
 				if(buffer->LookAheadTokenType(1)
 						== semantia::TokenType::SEMANTIA_EOF_TOKEN_TYPE()){
-					return Ast::Ptr();
+					return nullptr;
 				}else{
 					buffer->Match(buffer->LookAheadTokenType(1));
 					processor("pattern");
-					return Ast::Ptr();
+					return nullptr;
 				}
 			}))
 			;
