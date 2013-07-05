@@ -292,7 +292,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> const Ast::Ptr {
 				lang_parser_.DebugPrint("##program");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -308,7 +309,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider
+					)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##external_declaration1");
 				return processor("declaration");
@@ -316,7 +319,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##external_declaration2");
 				return processor("function_definition");
@@ -326,7 +330,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##declaration");
 				auto cons = 
@@ -341,7 +346,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##declarator_list");
 				auto dec = processor("declarator");
@@ -361,7 +367,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##declarator");
 				return CreateAst(matcher(lexia::TokenType::IDENTIFIER()));	
@@ -371,7 +378,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##function_definition1");
 				auto cons1 = 
@@ -388,7 +396,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##function_definition2");
 				auto cons1 = 
@@ -409,7 +418,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##parameter_type_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -425,7 +435,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##parameter_declaration");
 				auto cons = CreateAst(lexia::Token::PARAMETER_DECLARATION_TOKEN());
@@ -438,7 +449,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement1");
 				matcher(lexia::TokenType::SEMICOLON());
@@ -447,7 +459,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement2");
 				auto exp = processor("expression");
@@ -457,7 +470,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement3");
 				return processor("compound_statement");
@@ -465,7 +479,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement4");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -481,7 +496,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement5");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -495,7 +511,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement6");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -509,7 +526,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement7");
 				auto ret = CreateAst(matcher(lexia::TokenType::RETURN()));
@@ -519,7 +537,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement8");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -533,7 +552,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##compound_statement1");
 				matcher(lexia::TokenType::LEFT_BRACE());
@@ -543,7 +563,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##compound_statement2");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
@@ -555,7 +576,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##compound_statement3");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
@@ -567,7 +589,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##compound_statement4");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
@@ -582,7 +605,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##declaration_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -597,7 +621,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -626,7 +651,8 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor)
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##expression");
 				auto ass = processor("assign_expression");
@@ -647,8 +673,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##assign_expression1");
 				auto left_id = CreateAst(matcher(lexia::TokenType::IDENTIFIER()));
 				auto eq = CreateAst(matcher(lexia::TokenType::EQUAL()));
@@ -662,8 +689,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##assign_expression2");
 				return processor("logical_or_expression");
 			}));
@@ -672,8 +700,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##logical_or_expression");
 				auto first_exp = processor("logical_and_expression");
 				if(!IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
@@ -702,8 +731,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##logical_and_expression");
 				auto first_exp = processor("equality_expression");
 				if(!IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
@@ -732,8 +762,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##equality_expression");
 				auto first_exp = processor("relational_expression");
 				const auto next_token = looker(1);
@@ -772,8 +803,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##relational_expression");
 				auto first_exp = processor("add_expression");
 				const auto next_token = looker(1);
@@ -819,8 +851,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##add_expression");
 				auto first_exp = processor("multiply_expression");
 				auto is_add = [](const LangToken& token) -> const bool {
@@ -856,8 +889,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##multiply_expression");
 				auto first_exp = processor("unary_expression");
 				auto is_multiply = [](const LangToken& token) -> const bool {
@@ -893,8 +927,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##unary_expression");
 				if(IsTokenTypeSame(looker(1), lexia::TokenType::MINUS())){
 					auto cons = CreateAst(lexia::Token::CONS_TOKEN());
@@ -912,8 +947,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##postfix_expression1");
 				auto func_call = 
 					CreateAst(lexia::Token::FUNCTION_CALL_TOKEN());
@@ -926,8 +962,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##postfix_expression2");
 				auto func_call = CreateAst(lexia::Token::FUNCTION_CALL_TOKEN());
 				func_call->AddChild(CreateAst(
@@ -940,8 +977,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##postfix_expression3");
 				return processor("primary_expression");	
 			}));
@@ -950,8 +988,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##primary_expression");
 				const auto next_token = looker(1);
 				if(IsTokenTypeSame(next_token, 
@@ -979,8 +1018,9 @@ private:
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
 					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor
-					) -> const Ast::Ptr {
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##argument_expression_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("assign_expression"));
