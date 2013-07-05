@@ -1,12 +1,11 @@
 #pragma once
 //TigerCat:20130624
 //#define SEMANTIA_BASIC_TREE_WALKER_DEBUG_ON
-//#define PARSIA_TOKEN_BUFFER_DEBUG_ON
+#define PARSIA_TOKEN_BUFFER_DEBUG_ON
 //#define LEXIA_LEXER_DEBUG_ON
 #include <iostream>
 #include "Lexia/Lexer.h"
 #include "Parsia/BasicParser.h"
-#include "Parsia/BasicSyntaxRule.h"
 #include "Semantia/BasicTree.h"
 #include "Semantia/Token.h"
 #include "Semantia/SyntaxTreeStream.h"
@@ -15,146 +14,114 @@
 #include "Symbolia/GlobalScope.h"
 #include "Symbolia/VariableSymbol.h"
 #include "Symbolia/FunctionSymbol.h"
+#include "Token.h"
 
 namespace tiger_cat
 {
-
-using Ast = semantia::BasicTree<semantia::Token>;
-
-auto ParsiaToken(const lexia::Token& lexia_token) -> const parsia::Token {
-	return parsia::Token(
-		lexia_token.GetType().ToString(),
-		parsia::Word(lexia_token.GetWord().ToString())
-	);	
-}
-
-auto ParsiaToken(const semantia::Token& semantia_token) -> const parsia::Token {
-	return parsia::Token(
-		semantia_token.GetType().ToString(),
-		parsia::Word(semantia_token.GetWord().ToString())
-	);	
-}
-
-auto SymboliaWord(const semantia::Word& word) -> const symbolia::Word {
+using Ast = semantia::BasicTree<Token>;
+using LangToken = lexia::Token;
+using LangTokenType = lexia::TokenType;
+using LangParser = parsia::BasicParser<LangToken, LangTokenType, Ast::Ptr>;
+using LangTokenBuffer = LangParser::TokenBuffer;
+/*
+using AstParser = 
+	parsia::BasicParser<semantia::Token, semantia::TokenType, void*>;
+auto SymboliaWord(const Word& word) -> const symbolia::Word {
 	return symbolia::Word(word.ToString());	
 }
-
-auto CreateAst(const lexia::Token& token) -> const Ast::Ptr {
-	semantia::Token semantia_token(
-		semantia::TokenType(token.GetType().ToString()), 
-		semantia::Word(token.GetWord().ToString()));
-	return Ast::Create(semantia_token);
+*/
+auto CreateToken(const lexia::Token& lexia_token) -> const Token {
+	return Token(TokenType(lexia_token.GetType().ToString()),
+		Word(lexia_token.GetWord().ToString()));
 }
 
-auto CreateAst(const parsia::Token& token) -> const Ast::Ptr {
-	semantia::Token semantia_token(
-		semantia::TokenType(token.GetType().ToString()), 
-		semantia::Word(token.GetWord().ToString()));
-	return Ast::Create(semantia_token);
+auto CreateAst(const lexia::Token& lexia_token) -> const Ast::Ptr {
+	return Ast::Create(CreateToken(lexia_token));	
 }
 
-auto CreateAst(const semantia::Token& token) -> const Ast::Ptr {
-	return Ast::Create(token);
+auto GetType(const LangToken& token) -> const LangTokenType {
+	return token.GetType();
 }
 
-auto operator==(const parsia::TokenType& left, const lexia::TokenType& right) -> bool {
-	return left.ToString() == right.ToString();	
-}
-
-auto operator!=(const parsia::TokenType& left, const lexia::TokenType& right) -> bool {
-	return !(left == right);	
-}
-
-auto operator==(const parsia::TokenType& left, const semantia::TokenType& right) -> bool {
-	return left.ToString() == right.ToString();	
-}
-
-auto operator!=(const parsia::TokenType& left, const semantia::TokenType& right) -> bool {
-	return !(left == right);	
-}
-
-auto Match(const parsia::TokenBuffer::Ptr& buffer, 
-		const lexia::TokenType& type) -> const semantia::Token {
-	auto parsia_token = buffer->Match(parsia::TokenType(type.ToString()));
-	return semantia::Token(
-		semantia::TokenType(parsia_token.GetType().ToString()),
-		semantia::Word(parsia_token.GetWord().ToString()));
-}
-
-auto Match(const parsia::TokenBuffer::Ptr& buffer, 
-		const semantia::TokenType& type) -> const semantia::Token {
-	auto parsia_token = buffer->Match(parsia::TokenType(type.ToString()));
-	return semantia::Token(
-		semantia::TokenType(parsia_token.GetType().ToString()),
-		semantia::Word(parsia_token.GetWord().ToString()));
-}
-
-auto Match(const parsia::TokenBuffer::Ptr& buffer, 
-		const parsia::TokenType& type) -> const semantia::Token {
-	auto parsia_token = buffer->Match(parsia::TokenType(type.ToString()));
-	return semantia::Token(
-		semantia::TokenType(parsia_token.GetType().ToString()),
-		semantia::Word(parsia_token.GetWord().ToString()));
+auto IsTokenTypeSame(const LangToken& token, const LangTokenType& type) -> const bool {
+	return GetType(token) == type;
 }
 
 class TigerCat{
 public:
+
     TigerCat(const std::string& code) : 
 		lexer_(code),
-		language_parser_(),
-		ast_root_(),
+		lang_parser_(),
+		ast_root_()/*,
 		ast_stream_(),
-		ast_parser_(){}
+		ast_parser_()*/{}
     ~TigerCat(){}
 
 	auto Define() -> void {
 		DefineLanguageSyntax();
-		DefineTreePatternForSymbolTable();
+		//DefineTreePatternForSymbolTable();
 	}
 
-	auto InitLanguageTokenBuffer() -> void {
-		language_parser_.InitTokenBuffer(parsia::TokenBuffer::NextTokenGetter(
-				[this]() -> parsia::Token {
-			return ParsiaToken(lexer_.GetNextToken());
-		}));
+	auto InitLangTokenBuffer() -> void {
+		lang_parser_.InitTokenBuffer(
+			LangTokenBuffer::NextTokenGetter([this]() -> const LangToken {
+				return lexer_.GetNextToken();
+			}),
+			LangTokenBuffer::IsTokenTypeSameDecider([](
+					const LangToken& token, const LangTokenType& type) -> const bool {
+				return token.GetType() == type;
+			}),	
+			LangTokenBuffer::TokenOutputter([](
+					std::ostream& os, const LangToken& token) -> void {
+				os << "[" << token.GetWord().ToString() << "]";
+			}),
+			LangTokenBuffer::TokenTypeOutputter([](
+					std::ostream& os, const LangTokenType& type) -> void {
+				os << "\"" << type.ToString() << "\"";
+			})
+		);
 	}
 
+	/*
 	auto InitAstTokenBuffer() -> void {
-		ast_parser_.InitTokenBuffer(parsia::TokenBuffer::NextTokenGetter(
+		ast_parser_.InitTokenBuffer(TokenBuffer::NextTokenGetter(
 				[this]() -> parsia::Token {
 			const auto token = ParsiaToken(ast_stream_->GetNextToken());
 			//std::cout << token << std::endl;
 			return token;
 		}));
 	}
-
+	*/
+	/*
 	auto InitAstStream() -> void {
 		ast_stream_ = semantia::SyntaxTreeStream::Create(ast_root_);	
 	}
+	*/
 
 	auto MakeAbstractSyntaxTree() -> const Ast::Ptr {
-		ast_root_ = language_parser_.ProcessRule("program");
+		ast_root_ = lang_parser_.ProcessRule("program");
 		return ast_root_;
 	}
 
+	/*
 	auto MakeSymbolTable() -> void {
 		const auto global_scope = symbolia::GlobalScope::Create();
 		symbol_table_.PushScope(global_scope);
 		ast_parser_.ProcessRule("pattern");	
 	}
+	*/
 
 private:
-	using LanguageParser = parsia::BasicParser<Ast::Ptr>;
-	using AstParser = parsia::BasicParser<void*>;
-
 	lexia::Lexer lexer_;
-	LanguageParser language_parser_;
+	LangParser lang_parser_;
 	Ast::Ptr ast_root_;
-	semantia::SyntaxTreeStream::Ptr ast_stream_;
-	AstParser ast_parser_;
-	symbolia::SymbolTable symbol_table_;
+	//semantia::SyntaxTreeStream::Ptr ast_stream_;
+	//AstParser ast_parser_;
+	//symbolia::SymbolTable symbol_table_;
 
 private:
+	/*
 	auto DefineTreePatternForSymbolTable() -> void {
 		ast_parser_.DefineSyntaxRule("pattern")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
@@ -319,359 +286,372 @@ private:
 			}))
 			;
 	}
-
+	*/
 	auto DefineLanguageSyntax() -> void {
-		language_parser_.DefineSyntaxRule("program")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("program")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
+				lang_parser_.DebugPrint("##program");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("external_declaration"));	
-				while(buffer->LookAheadTokenType(1) 
-						!= lexia::TokenType::LEXIA_EOF_TOKEN_TYPE()){
+				while(!IsTokenTypeSame(looker(1), 
+						lexia::TokenType::LEXIA_EOF_TOKEN_TYPE())){
 					cons->AddChild(processor("external_declaration"));	
 				}
 				return cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("external_declaration")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("external_declaration")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##external_declaration1");
+				lang_parser_.DebugPrint("##external_declaration1");
 				return processor("declaration");
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##external_declaration2");
+				lang_parser_.DebugPrint("##external_declaration2");
 				return processor("function_definition");
 			}));
 
-		language_parser_.DefineSyntaxRule("declaration")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("declaration")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##declaration");
+				lang_parser_.DebugPrint("##declaration");
 				auto cons = 
 					CreateAst(lexia::Token::VARIABLE_DECLARATION_TOKEN());
-				cons->AddChild(Ast::Create(Match(buffer, lexia::TokenType::INT())));
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::INT())));
 				cons->AddChild(processor("declarator_list"));
-				Match(buffer, lexia::TokenType::SEMICOLON());
+				matcher(lexia::TokenType::SEMICOLON());
 				return cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("declarator_list")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("declarator_list")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##declarator_list");
+				lang_parser_.DebugPrint("##declarator_list");
 				auto dec = processor("declarator");
-				if(buffer->LookAheadTokenType(1) 
-						!= lexia::TokenType::COMMA()){
+				if(!IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){
 					return dec;
 				}
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(dec);
-				while(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::COMMA()){
-					Match(buffer, lexia::TokenType::COMMA());
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){
+					matcher(lexia::TokenType::COMMA());
 					cons->AddChild(processor("declarator"));
 				}
 				return cons;
 			}));	
 
-		language_parser_.DefineSyntaxRule("declarator")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("declarator")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##declarator");
-				return Ast::Create(Match(buffer, lexia::TokenType::IDENTIFIER()));	
+				lang_parser_.DebugPrint("##declarator");
+				return CreateAst(matcher(lexia::TokenType::IDENTIFIER()));	
 			}));
 
-		language_parser_.DefineSyntaxRule("function_definition")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("function_definition")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##function_definition1");
+				lang_parser_.DebugPrint("##function_definition1");
 				auto cons1 = 
 					CreateAst(lexia::Token::FUNCTION_DECLARATION_TOKEN());
 				auto cons2 = CreateAst(lexia::Token::CONS_TOKEN());
 				cons1->AddChild(cons2);
-				cons2->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::INT())));
+				cons2->AddChild(CreateAst(matcher(lexia::TokenType::INT())));
 				cons2->AddChild(processor("declarator"));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons1->AddChild(processor("compound_statement"));
 				return cons1;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##function_definition2");
+				lang_parser_.DebugPrint("##function_definition2");
 				auto cons1 = 
 					CreateAst(lexia::Token::FUNCTION_DECLARATION_TOKEN());
 				auto cons2 = CreateAst(lexia::Token::CONS_TOKEN());
 				cons1->AddChild(cons2);
-				cons2->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::INT())));
+				cons2->AddChild(CreateAst(matcher(lexia::TokenType::INT())));
 				cons2->AddChild(processor("declarator"));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons1->AddChild(processor("parameter_type_list"));
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons1->AddChild(processor("compound_statement"));
 				return cons1;
 			}))
 			;	
 
-		language_parser_.DefineSyntaxRule("parameter_type_list")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("parameter_type_list")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##parameter_type_list");
+				lang_parser_.DebugPrint("##parameter_type_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("parameter_declaration"));
-				while(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::COMMA()){
-					Match(buffer, lexia::TokenType::COMMA());
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){
+					matcher(lexia::TokenType::COMMA());
 					cons->AddChild(processor("parameter_declaration"));
 				}
 				return cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("parameter_declaration")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("parameter_declaration")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##parameter_declaration");
+				lang_parser_.DebugPrint("##parameter_declaration");
 				auto cons = CreateAst(lexia::Token::PARAMETER_DECLARATION_TOKEN());
-				cons->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::INT())));
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::INT())));
 				cons->AddChild(processor("declarator"));
 				return cons;
 			}));
-
-		language_parser_.DefineSyntaxRule("statement")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		
+		lang_parser_.DefineSyntaxRule("statement")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement1");
-				Match(buffer, lexia::TokenType::SEMICOLON());
+				lang_parser_.DebugPrint("##statement1");
+				matcher(lexia::TokenType::SEMICOLON());
 				return CreateAst(lexia::Token::CONS_TOKEN());
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement2");
+				lang_parser_.DebugPrint("##statement2");
 				auto exp = processor("expression");
-				Match(buffer, lexia::TokenType::SEMICOLON());
+				matcher(lexia::TokenType::SEMICOLON());
 				return exp;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement3");
+				lang_parser_.DebugPrint("##statement3");
 				return processor("compound_statement");
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement4");
+				lang_parser_.DebugPrint("##statement4");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::IF())));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::IF())));
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons->AddChild(processor("statement"));
-				Match(buffer, lexia::TokenType::ELSE());
+				matcher(lexia::TokenType::ELSE());
 				cons->AddChild(processor("statement"));
 				return cons;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement5");
+				lang_parser_.DebugPrint("##statement5");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::IF())));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::IF())));
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons->AddChild(processor("statement"));
 				return cons;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement6");
+				lang_parser_.DebugPrint("##statement6");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::WHILE())));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::WHILE())));
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons->AddChild(processor("statement"));
 				return cons;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement7");
-				auto ret = Ast::Create(
-					Match(buffer, lexia::TokenType::RETURN()));
-				Match(buffer, lexia::TokenType::SEMICOLON());
+				lang_parser_.DebugPrint("##statement7");
+				auto ret = CreateAst(matcher(lexia::TokenType::RETURN()));
+				matcher(lexia::TokenType::SEMICOLON());
 				return ret;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement8");
+				lang_parser_.DebugPrint("##statement8");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::RETURN())));
+				cons->AddChild(CreateAst(matcher(lexia::TokenType::RETURN())));
 				cons->AddChild(processor("expression"));
-				Match(buffer, lexia::TokenType::SEMICOLON());
+				matcher(lexia::TokenType::SEMICOLON());
 				return cons;
 			}));
-
-		language_parser_.DefineSyntaxRule("compound_statement")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		
+		lang_parser_.DefineSyntaxRule("compound_statement")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##compound_statement1");
-				Match(buffer, lexia::TokenType::LEFT_BRACE());
-				Match(buffer, lexia::TokenType::RIGHT_BRACE());
+				lang_parser_.DebugPrint("##compound_statement1");
+				matcher(lexia::TokenType::LEFT_BRACE());
+				matcher(lexia::TokenType::RIGHT_BRACE());
 				return CreateAst(lexia::Token::BLOCK_TOKEN());
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##compound_statement2");
+				lang_parser_.DebugPrint("##compound_statement2");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
-				Match(buffer, lexia::TokenType::LEFT_BRACE());
+				matcher(lexia::TokenType::LEFT_BRACE());
 				block->AddChild(processor("declaration_list"));
-				Match(buffer, lexia::TokenType::RIGHT_BRACE());
+				matcher(lexia::TokenType::RIGHT_BRACE());
 				return block;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##compound_statement3");
+				lang_parser_.DebugPrint("##compound_statement3");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
-				Match(buffer, lexia::TokenType::LEFT_BRACE());
+				matcher(lexia::TokenType::LEFT_BRACE());
 				block->AddChild(processor("statement_list"));
-				Match(buffer, lexia::TokenType::RIGHT_BRACE());
+				matcher(lexia::TokenType::RIGHT_BRACE());
 				return block;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##compound_statement4");
+				lang_parser_.DebugPrint("##compound_statement4");
 				auto block = CreateAst(lexia::Token::BLOCK_TOKEN());
-				Match(buffer, lexia::TokenType::LEFT_BRACE());
+				matcher(lexia::TokenType::LEFT_BRACE());
 				block->AddChild(processor("declaration_list"));
 				block->AddChild(processor("statement_list"));
-				Match(buffer, lexia::TokenType::RIGHT_BRACE());
+				matcher(lexia::TokenType::RIGHT_BRACE());
 				return block;
 			}));
-		
-		language_parser_.DefineSyntaxRule("declaration_list")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+
+		lang_parser_.DefineSyntaxRule("declaration_list")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##declaration_list");
+				lang_parser_.DebugPrint("##declaration_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("declaration"));
-				while(buffer->LookAheadTokenType(1) == lexia::TokenType::INT()){
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::INT())){
 					cons->AddChild(processor("declaration"));
 				}
 				return cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("statement_list")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+		lang_parser_.DefineSyntaxRule("statement_list")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##statement_list");
+				lang_parser_.DebugPrint("##statement_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("statement"));
-				while(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::SEMICOLON() || 
-						buffer->LookAheadTokenType(1) 
-							== lexia::TokenType::IDENTIFIER() || 
-						buffer->LookAheadTokenType(1)
-							== lexia::TokenType::MINUS() || 
-						buffer->LookAheadTokenType(1) 
-							== lexia::TokenType::LEFT_BRACE() || 
-						buffer->LookAheadTokenType(1)
-							== lexia::TokenType::IF() || 
-						buffer->LookAheadTokenType(1)
-							== lexia::TokenType::WHILE() || 
-						buffer->LookAheadTokenType(1)
-							== lexia::TokenType::RETURN()){
+				while(IsTokenTypeSame(looker(1), 
+							lexia::TokenType::SEMICOLON()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::IDENTIFIER()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::MINUS()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::LEFT_BRACE()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::IF()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::WHILE()) || 
+						IsTokenTypeSame(looker(1), 
+							lexia::TokenType::RETURN())){
 					cons->AddChild(processor("statement"));
 				}
 				return cons;
 			}))
 			;
-		
-		language_parser_.DefineSyntaxRule("expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer,
-					const LanguageParser::SyntaxRule::RuleProcessor& processor)
+	
+		lang_parser_.DefineSyntaxRule("expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor)
 					-> const Ast::Ptr { 
-				buffer->DebugPrint("##expression");
+				lang_parser_.DebugPrint("##expression");
 				auto ass = processor("assign_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::COMMA()){
+				if(!IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){
 					return ass;
 				}
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(ass);
-				while(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::COMMA()){
-					Match(buffer, lexia::TokenType::COMMA());
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){
+					matcher(lexia::TokenType::COMMA());
 					cons->AddChild(processor("assign_expression"));
 				}	
 				return cons;
 			}))
 			;
 		
-		language_parser_.DefineSyntaxRule("assign_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("assign_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##assign_expression1");
-				auto left_id = Ast::Create(
-					Match(buffer, lexia::TokenType::IDENTIFIER()));
-				auto eq = Ast::Create(
-					Match(buffer, lexia::TokenType::EQUAL()));
+				lang_parser_.DebugPrint("##assign_expression1");
+				auto left_id = CreateAst(matcher(lexia::TokenType::IDENTIFIER()));
+				auto eq = CreateAst(matcher(lexia::TokenType::EQUAL()));
 				auto right_exp = processor("assign_expression");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(eq);
@@ -679,34 +659,37 @@ private:
 				cons->AddChild(right_exp);
 				return cons;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##assign_expression2");
+				lang_parser_.DebugPrint("##assign_expression2");
 				return processor("logical_or_expression");
 			}));
 
-		language_parser_.DefineSyntaxRule("logical_or_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("logical_or_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##logical_or_expression");
+				lang_parser_.DebugPrint("##logical_or_expression");
 				auto first_exp = processor("logical_and_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::OR()){
+				if(!IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
-				while(buffer->LookAheadTokenType(1) == lexia::TokenType::OR()){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, lexia::TokenType::OR())));
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
+					inner_cons->AddChild(
+						CreateAst(matcher(lexia::TokenType::OR())));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("logical_and_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::OR()){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
+					if(IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
+						auto new_inner_cons = 
+							CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -715,26 +698,28 @@ private:
 				return outer_cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("logical_and_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("logical_and_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##logical_and_expression");
+				lang_parser_.DebugPrint("##logical_and_expression");
 				auto first_exp = processor("equality_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::AND()){
+				if(!IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
-				while(buffer->LookAheadTokenType(1) == lexia::TokenType::AND()){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, lexia::TokenType::AND())));
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
+					inner_cons->AddChild(
+						CreateAst(matcher(lexia::TokenType::AND())));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("equality_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::AND()){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
+					if(IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
+						auto new_inner_cons = 
+							CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -743,28 +728,35 @@ private:
 				return outer_cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("equality_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("equality_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##equality_expression");
+				lang_parser_.DebugPrint("##equality_expression");
 				auto first_exp = processor("relational_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::EQUALEQUAL() 
-						&& buffer->LookAheadTokenType(1) != lexia::TokenType::NOT_EQUAL()){
+				const auto next_token = looker(1);
+				if(!IsTokenTypeSame(next_token, 
+							lexia::TokenType::EQUALEQUAL()) && 
+						!IsTokenTypeSame(next_token, 
+							lexia::TokenType::NOT_EQUAL())){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, buffer->LookAheadTokenType(1))));
+					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("relational_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::EQUALEQUAL()
-							|| buffer->LookAheadTokenType(1) == lexia::TokenType::NOT_EQUAL()){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
+					const auto next_token = looker(1);
+					if(IsTokenTypeSame(next_token, 
+							lexia::TokenType::EQUALEQUAL()) || 
+						IsTokenTypeSame(next_token, 
+							lexia::TokenType::NOT_EQUAL())){
+						auto new_inner_cons = 
+							CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -776,37 +768,41 @@ private:
 				return outer_cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("relational_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("relational_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##relational_expression");
+				lang_parser_.DebugPrint("##relational_expression");
 				auto first_exp = processor("add_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::LOWER_THAN() 
-						&& buffer->LookAheadTokenType(1) 
-							!= lexia::TokenType::HIGHER_THAN()
-						&& buffer->LookAheadTokenType(1) 
-							!= lexia::TokenType::LOWER_EQUAL()
-						&& buffer->LookAheadTokenType(1) 
-							!= lexia::TokenType::HIGHER_EQUAL()){
+				const auto next_token = looker(1);
+				if(!IsTokenTypeSame(next_token, 
+							lexia::TokenType::LOWER_THAN()) && 
+						!IsTokenTypeSame(next_token, 
+							lexia::TokenType::HIGHER_THAN()) && 
+						!IsTokenTypeSame(next_token, 
+							lexia::TokenType::LOWER_EQUAL()) && 
+						!IsTokenTypeSame(next_token, 
+							lexia::TokenType::HIGHER_EQUAL())){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, buffer->LookAheadTokenType(1))));
+					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("add_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::LOWER_THAN() 
-							|| buffer->LookAheadTokenType(1) 
-								== lexia::TokenType::HIGHER_THAN()
-							|| buffer->LookAheadTokenType(1) 
-								== lexia::TokenType::LOWER_EQUAL()
-							|| buffer->LookAheadTokenType(1) 
-								== lexia::TokenType::HIGHER_EQUAL()){
+					const auto next_token = looker(1);
+					if(IsTokenTypeSame(next_token, 
+								lexia::TokenType::LOWER_THAN()) ||
+							IsTokenTypeSame(next_token, 
+								lexia::TokenType::HIGHER_THAN()) || 
+							IsTokenTypeSame(next_token, 
+								lexia::TokenType::LOWER_EQUAL()) ||
+							IsTokenTypeSame(next_token, 
+								lexia::TokenType::HIGHER_EQUAL())){
 						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
@@ -819,27 +815,31 @@ private:
 				return outer_cons;
 			}));
 
-		language_parser_.DefineSyntaxRule("add_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("add_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##add_expression");
+				lang_parser_.DebugPrint("##add_expression");
 				auto first_exp = processor("multiply_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::PLUS() 
-						&& buffer->LookAheadTokenType(1) != lexia::TokenType::MINUS()){
+				auto is_add = [](const LangToken& token) -> const bool {
+					return IsTokenTypeSame(token, 
+							lexia::TokenType::PLUS()) ||
+						IsTokenTypeSame(token, 
+							lexia::TokenType::MINUS());
+				};
+				if(!is_add(looker(1))){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, buffer->LookAheadTokenType(1))));
+					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("multiply_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::PLUS() 
-							|| buffer->LookAheadTokenType(1) == lexia::TokenType::MINUS()){
+					if(is_add(looker(1))){
 						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
@@ -852,27 +852,31 @@ private:
 				return outer_cons;
 			}));
 		
-		language_parser_.DefineSyntaxRule("multiply_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("multiply_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##multiply_expression");
+				lang_parser_.DebugPrint("##multiply_expression");
 				auto first_exp = processor("unary_expression");
-				if(buffer->LookAheadTokenType(1) != lexia::TokenType::MULTIPLY() 
-						&& buffer->LookAheadTokenType(1) != lexia::TokenType::DIVIDE()){
+				auto is_multiply = [](const LangToken& token) -> const bool {
+					return IsTokenTypeSame(token, 
+							lexia::TokenType::MULTIPLY()) ||
+						IsTokenTypeSame(token, 
+							lexia::TokenType::DIVIDE());
+				};
+				if(!is_multiply(looker(1))){
 					return first_exp;
 				}
 				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(Ast::Create(
-						Match(buffer, buffer->LookAheadTokenType(1))));
+					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("unary_expression");
-					if(buffer->LookAheadTokenType(1) == lexia::TokenType::MULTIPLY() 
-							|| buffer->LookAheadTokenType(1) == lexia::TokenType::DIVIDE()){
+					if(is_multiply(looker(1))){
 						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
@@ -885,16 +889,17 @@ private:
 				return outer_cons;
 			}));
 		
-		language_parser_.DefineSyntaxRule("unary_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("unary_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##unary_expression");
-				if(buffer->LookAheadTokenType(1) == lexia::TokenType::MINUS()){
+				lang_parser_.DebugPrint("##unary_expression");
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::MINUS())){
 					auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-					cons->AddChild(Ast::Create(
-						Match(buffer, lexia::TokenType::MINUS())));
+					cons->AddChild(
+						CreateAst(matcher(lexia::TokenType::MINUS())));
 					cons->AddChild(processor("unary_expression"));
 					return cons;
 				}
@@ -903,79 +908,84 @@ private:
 				}
 			}));
 
-		language_parser_.DefineSyntaxRule("postfix_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("postfix_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##postfix_expression1");
+				lang_parser_.DebugPrint("##postfix_expression1");
 				auto func_call = 
 					CreateAst(lexia::Token::FUNCTION_CALL_TOKEN());
 				func_call->AddChild(CreateAst(
-					Match(buffer, lexia::TokenType::IDENTIFIER())));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+					matcher(lexia::TokenType::IDENTIFIER())));
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				return func_call;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##postfix_expression2");
+				lang_parser_.DebugPrint("##postfix_expression2");
 				auto func_call = CreateAst(lexia::Token::FUNCTION_CALL_TOKEN());
-				func_call->AddChild(Ast::Create(
-					Match(buffer, lexia::TokenType::IDENTIFIER())));
-				Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());
+				func_call->AddChild(CreateAst(
+					matcher(lexia::TokenType::IDENTIFIER())));
+				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				func_call->AddChild(processor("argument_expression_list"));
-				Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());
+				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				return func_call;
 			}))
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##postfix_expression3");
+				lang_parser_.DebugPrint("##postfix_expression3");
 				return processor("primary_expression");	
 			}));
 
-		language_parser_.DefineSyntaxRule("primary_expression")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("primary_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##primary_expression");
-				if(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::IDENTIFIER()){	
+				lang_parser_.DebugPrint("##primary_expression");
+				const auto next_token = looker(1);
+				if(IsTokenTypeSame(next_token, 
+						lexia::TokenType::IDENTIFIER())){	
 					auto var_ref = 
 						CreateAst(lexia::Token::VARIABLE_REFERENCE_TOKEN());
-					var_ref->AddChild(CreateAst(
-						Match(buffer, lexia::TokenType::IDENTIFIER())));
+					var_ref->AddChild(
+						CreateAst(matcher(lexia::TokenType::IDENTIFIER())));
 					return var_ref;
 				}
-				else if(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::CONSTANT()){	
+				else if(IsTokenTypeSame(next_token, 
+						lexia::TokenType::CONSTANT())){	
 					return CreateAst(
-						Match(buffer, lexia::TokenType::CONSTANT()));	
+						matcher(lexia::TokenType::CONSTANT()));	
 				}
 				else {
-					Match(buffer, lexia::TokenType::LEFT_PARENTHESIS());	
+					matcher(lexia::TokenType::LEFT_PARENTHESIS());	
 					auto exp = processor("expression");
-					Match(buffer, lexia::TokenType::RIGHT_PARENTHESIS());	
+					matcher(lexia::TokenType::RIGHT_PARENTHESIS());	
 					return exp;
 				}
 			}));
 
-		language_parser_.DefineSyntaxRule("argument_expression_list")
-			->AddChoice(LanguageParser::SyntaxRule::Choice([](
-					const parsia::TokenBuffer::Ptr& buffer, 
-					const LanguageParser::SyntaxRule::RuleProcessor& processor
+		lang_parser_.DefineSyntaxRule("argument_expression_list")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor
 					) -> const Ast::Ptr {
-				buffer->DebugPrint("##argument_expression_list");
+				lang_parser_.DebugPrint("##argument_expression_list");
 				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				cons->AddChild(processor("assign_expression"));
-				while(buffer->LookAheadTokenType(1) 
-						== lexia::TokenType::COMMA()){ 
-					Match(buffer, buffer->LookAheadTokenType(1));
+				while(IsTokenTypeSame(looker(1), lexia::TokenType::COMMA())){ 
+					matcher(lexia::TokenType::COMMA());
 					cons->AddChild(processor("assign_expression"));
 				}	
 				return cons;

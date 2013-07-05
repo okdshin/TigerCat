@@ -25,17 +25,17 @@ int main(int argc, char* argv[])
 	std::string code(
 		(std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
 	TigerCat tiger_cat(code);
+	tiger_cat.InitLangTokenBuffer();
 	tiger_cat.Define();
-	tiger_cat.InitLanguageTokenBuffer();
 	try{
 		auto ast_root = tiger_cat.MakeAbstractSyntaxTree();
-		auto token2str = [](const semantia::Token& token){
+		auto token2str = [](const Token& token){
 				return token.GetWord().ToString();
 			};
 		std::cout << ast_root->ToString(token2str) << std::endl;
-		tiger_cat.InitAstStream();
-		tiger_cat.InitAstTokenBuffer();
-		tiger_cat.MakeSymbolTable();
+		//tiger_cat.InitAstStream();
+		//tiger_cat.InitAstTokenBuffer();
+		//tiger_cat.MakeSymbolTable();
 	}
 	catch(const lexia::InvalidCharactorError& e){
 		std::cout << "Lexer: " << e.what() << std::endl;
