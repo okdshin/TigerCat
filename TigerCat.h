@@ -197,22 +197,49 @@ public:
 				if(!decider()){
 					std::cout << "##variable declaration!!" << std::endl;
 				}
-				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_DECLARATION());
+				MatchNode(looker, matcher, 
+					lexia::TokenType::VARIABLE_DECLARATION());
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::INT());
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_DECLARATION());
+				MatchNode(looker, matcher, 
+					lexia::TokenType::VARIABLE_DECLARATION());
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
-				auto token = 
-					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
+				std::vector<Token::Ptr> var_token_list;
+				if(looker(1).GetType().ToString() 
+						== lexia::TokenType::CONS().ToString()){
+					MatchNode(looker, matcher, lexia::TokenType::CONS());
+					while(looker(1).GetType()
+							== semantia::TokenType::STEP_DOWN_TOKEN_TYPE()){
+						matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
+						auto var_token = MatchNode(looker, matcher, 
+							lexia::TokenType::IDENTIFIER());
+						var_token_list.push_back(var_token);	
+						matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
+						MatchNode(looker, matcher, lexia::TokenType::CONS());
+					}
+				}
+				else{
+					auto var_token = 
+						MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
+					var_token_list.push_back(var_token);
+				}
 				if(!decider()){
-					auto variable_symbol = symbolia::VariableSymbol::Create(
-						SymboliaWord(token->GetWord()), symbolia::Offset(4)
-						);
-					symbolia::SymbolTable::Define(symbol_table_, variable_symbol);
-					token->SetKind(Kind::VARIABLE_DECLARATION());
-					token->SetDepth(symbol_table_.GetCurrentScope()->GetDepth());
-					token->SetOffset(symbolia::Offset(4));
+					for(const auto& var_token : var_token_list){
+						auto offset = symbolia::Offset(
+							symbolia::SymbolTable::GetCurrentOffsetSum(
+								symbol_table_));
+						auto variable_symbol = symbolia::VariableSymbol::Create(
+							SymboliaWord(var_token->GetWord()), 
+							offset);
+						symbolia::SymbolTable::Define(symbol_table_,
+							variable_symbol,
+							symbolia::VariableSize(4));
+						var_token->SetKind(Kind::VARIABLE_DECLARATION());
+						var_token->SetDepth(
+							symbol_table_.GetCurrentScope()->GetDepth());
+						var_token->SetOffset(offset);
+					}
 				}
 				processor("pattern");
 				return nullptr;
@@ -226,7 +253,7 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				if(!decider()){
-					std::cout << "##function declaration!!" << std::endl;
+					std::cout << ">>>>function declaration!!" << std::endl;
 				}
 				MatchNode(looker, matcher, lexia::TokenType::FUNCTION_DECLARATION());
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
@@ -247,21 +274,26 @@ public:
 					function_symbol = symbolia::FunctionSymbol::Create(
 						SymboliaWord(func_token->GetWord()),
 						symbol_table_.GetCurrentScope());
-					symbolia::SymbolTable::Define(symbol_table_, function_symbol);
+					symbolia::SymbolTable::Define(symbol_table_, 
+						function_symbol, symbolia::VariableSize(0));
 					symbol_table_.PushScope(function_symbol);
 					symbolia::SymbolTable::DebugPrint(symbol_table_);
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::CONS());
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::FUNCTION_DECLARATION());
-				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, 
+					lexia::TokenType::FUNCTION_DECLARATION());
 				int param_count = 0;
-				if(looker(1).GetValue()->GetType().ToString() 
+				if(looker(2).GetValue()->GetType().ToString() 
 						== lexia::TokenType::CONS().ToString()){
+					matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 					MatchNode(looker, matcher, lexia::TokenType::CONS());
 					while(looker(1).GetType() != 
 							semantia::TokenType::STEP_UP_TOKEN_TYPE()){
+						if(!decider()){
+							std::cout << "##parameter declaration!!" << std::endl;
+						}
 						matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 						MatchNode(looker, matcher, 
 							lexia::TokenType::PARAMETER_DECLARATION());
@@ -272,20 +304,21 @@ public:
 							lexia::TokenType::PARAMETER_DECLARATION());
 						matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 						auto param_token = 
-							MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
+							MatchNode(looker, matcher, 
+								lexia::TokenType::IDENTIFIER());
 						if(!decider()){
-							std::cout << "##parameter declaration!!" << std::endl;
 							++param_count;
-							const auto variable_symbol = 
+							const auto offset = symbolia::Offset(4+4*param_count);
+							const auto param_symbol = 
 								symbolia::VariableSymbol::Create(
 									SymboliaWord(param_token->GetWord()), 
-									symbolia::Offset(4));
-							symbolia::SymbolTable::Define(
-								symbol_table_, variable_symbol);
+									offset);
+							symbolia::SymbolTable::Define(symbol_table_, 
+								param_symbol, symbolia::VariableSize(0));
 							param_token->SetKind(Kind::VARIABLE_DECLARATION());
 							param_token->SetDepth(
 								symbol_table_.GetCurrentScope()->GetDepth());
-							param_token->SetOffset(symbolia::Offset(4));
+							param_token->SetOffset(offset);
 						}
 						matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 						MatchNode(looker, matcher, 
@@ -336,7 +369,7 @@ public:
 					}
 					fcall_token->SetKind(Kind::FUNCTION_CALL());
 					fcall_token->SetDepth(dec.GetDepth());
-					fcall_token->SetOffset(dec.GetSymbol()->GetOffset());
+					//fcall_token->SetOffset(dec.GetSymbol()->GetOffset());
 				}
 				processor("pattern");
 				return nullptr;
@@ -350,7 +383,7 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				if(!decider()){
-					std::cout << "enter block: " << std::endl; 
+					std::cout << ">>>>>>>enter block: " << std::endl; 
 				}
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
@@ -362,6 +395,25 @@ public:
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("exit_function_declaration")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "<<<<<<<<exit func_dec: " << std::endl;
+				}
+				MatchNode(looker, matcher, 
+					lexia::TokenType::FUNCTION_DECLARATION());
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					symbol_table_.PopScope();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("exit_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
@@ -370,7 +422,7 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				if(!decider()){
-					std::cout << "exit block: " << std::endl;
+					std::cout << "<<<<<<<<exit block: " << std::endl;
 				}
 				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
@@ -389,8 +441,9 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				if(!decider()){
-					std::cout << "##empty block!!" << std::endl;
+					std::cout << ">>><<<empty block!!" << std::endl;
 				}
+				/*
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				if(looker(1).GetType() == AstTokenType::NODE_TOKEN_TYPE()){
 					if(looker(1).GetValue()->GetType().ToString() 
@@ -402,6 +455,13 @@ public:
 					}
 				}
 				throw parsia::SyntaxError("SyntaxError");
+				*/
+
+				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				processor("pattern");
+				return nullptr;	
 			}));
 		
 		ast_parser_.DefineSyntaxRule("pass")
@@ -446,6 +506,14 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				return processor("function_declaration");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_function_declaration");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
