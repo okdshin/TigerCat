@@ -206,7 +206,8 @@ public:
 					lexia::TokenType::VARIABLE_DECLARATION());
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				std::vector<Token::Ptr> var_token_list;
-				if(looker(1).GetType().ToString() 
+				assert(looker(1).GetType() == semantia::TokenType::NODE_TOKEN_TYPE());
+				if(looker(1).GetValue()->GetType().ToString() 
 						== lexia::TokenType::CONS().ToString()){
 					MatchNode(looker, matcher, lexia::TokenType::CONS());
 					while(looker(1).GetType()
@@ -443,20 +444,6 @@ public:
 				if(!decider()){
 					std::cout << ">>><<<empty block!!" << std::endl;
 				}
-				/*
-				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
-				if(looker(1).GetType() == AstTokenType::NODE_TOKEN_TYPE()){
-					if(looker(1).GetValue()->GetType().ToString() 
-							== lexia::TokenType::BLOCK().ToString()){
-						matcher(AstTokenType::NODE_TOKEN_TYPE());
-						matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
-						processor("pattern");
-						return nullptr;	
-					}
-				}
-				throw parsia::SyntaxError("SyntaxError");
-				*/
-
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
