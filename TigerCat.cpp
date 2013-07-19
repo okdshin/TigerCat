@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 	}
 	std::ifstream ifs(argv[1]);
 #else
-	std::ifstream ifs("test4.tc");
+	std::ifstream ifs("test13.tc");
 #endif
 	if(!ifs){
 		std::cout << "Compiler: "
@@ -48,8 +48,9 @@ int main(int argc, char* argv[])
 		tiger_cat.InitAstStream();
 		tiger_cat.InitAstTokenBuffer();
 		tiger_cat.DefineTreePatternForSymbolTable();
-		tiger_cat.MakeSymbolTable();
+		tiger_cat.Compile();
 		std::cout << ast_root->ToString(token2str) << std::endl;
+		tiger_cat.OutputResult(std::cout);
 	}
 	catch(const lexia::InvalidCharactorError& e){
 		std::cout << "Lexer: " << e.what() << std::endl;

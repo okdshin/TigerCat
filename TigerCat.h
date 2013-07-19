@@ -15,6 +15,8 @@
 #include "Symbolia/VariableSymbol.h"
 #include "Symbolia/FunctionSymbol.h"
 #include "Token.h"
+#include "Codia/Code.h"
+#include "Codia/CodeList.h"
 
 namespace tiger_cat
 {
@@ -29,6 +31,9 @@ using NoneReturnType = void*;
 using AstParser = parsia::BasicParser<AstToken, AstTokenType, NoneReturnType>;
 
 using AstStream = semantia::BasicTreeStream<Token::Ptr>;
+
+using AsmCode = codia::Code; 
+using AsmCodeList = codia::CodeList; 
 
 auto SymboliaWord(const Word& word) -> const symbolia::Word {
 	return symbolia::Word(word.ToString());	
@@ -72,6 +77,13 @@ auto MatchTree(const AstParser::SyntaxRule::AheadTokenLooker& looker,
 	throw parsia::SyntaxError("SyntaxError");
 }
 
+auto Expect(const AstParser::SyntaxRule::AheadTokenLooker& looker,
+		const AstTokenType& type) -> void {
+	if(looker(1).GetType() != type){
+		throw parsia::SyntaxError("ChoiceError");
+	}	
+}
+
 class TigerCat{
 public:
 
@@ -80,7 +92,8 @@ public:
 		lang_parser_(),
 		ast_root_(),
 		ast_stream_(),
-		ast_parser_(){}
+		ast_parser_(),
+		asm_code_list_(AsmCodeList::Create()){}
     ~TigerCat(){}
 
 	auto Define() -> void {
@@ -141,10 +154,14 @@ public:
 		);
 	}
 
-	auto MakeSymbolTable() -> void {
+	auto Compile() -> void {
 		const auto global_scope = symbolia::GlobalScope::Create();
 		symbol_table_.PushScope(global_scope);
 		ast_parser_.ProcessRule("pattern");	
+	}
+
+	auto OutputResult(std::ostream& os)const -> void {
+		asm_code_list_->Output(os);
 	}
 
 private:
@@ -157,36 +174,12 @@ private:
 
 	symbolia::SymbolTable symbol_table_;
 
+	AsmCodeList::Ptr asm_code_list_;
+
+	symbolia::Symbol::Ptr current_assigned_symbol_;
+
 public:
 	auto DefineTreePatternForSymbolTable() -> void {
-		ast_parser_.DefineSyntaxRule("variable_reference")
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
-				if(!decider()){
-					std::cout << "##variable reference!!" << std::endl;
-				}
-				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
-				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
-				const auto var_token = 
-					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
-				if(!decider()){
-					const auto dec = symbolia::SymbolTable::Resolve(
-						symbol_table_, SymboliaWord(var_token->GetWord()));
-					std::cout << dec << std::endl;
-					var_token->SetKind(Kind::VARIABLE_REFERENCE());
-					var_token->SetDepth(dec.GetDepth());
-					var_token->SetOffset(symbolia::Offset(4));
-				}
-				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
-				processor("pattern");
-				return nullptr;
-			}));
-
 		ast_parser_.DefineSyntaxRule("variable_declaration")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
@@ -229,7 +222,7 @@ public:
 					for(const auto& var_token : var_token_list){
 						auto offset = symbolia::Offset(
 							symbolia::SymbolTable::GetCurrentOffsetSum(
-								symbol_table_));
+								symbol_table_)-4);
 						auto variable_symbol = symbolia::VariableSymbol::Create(
 							SymboliaWord(var_token->GetWord()), 
 							offset);
@@ -279,6 +272,14 @@ public:
 						function_symbol, symbolia::VariableSize(0));
 					symbol_table_.PushScope(function_symbol);
 					symbolia::SymbolTable::DebugPrint(symbol_table_);
+					asm_code_list_->Pushback(
+						AsmCode("\tGLOBAL "+func_token->GetWord().ToString()));
+					asm_code_list_->Pushback(
+						AsmCode(func_token->GetWord().ToString()+"\tpush\tebp"));
+					asm_code_list_->Pushback(
+						AsmCode("\tmov\tebp, esp"));
+					asm_code_list_->Pushback(
+						AsmCode("\tsub\tesp, Nlocal"));
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::CONS());
@@ -376,6 +377,232 @@ public:
 				return nullptr;
 			}));
 
+		/*
+		ast_parser_.DefineSyntaxRule("enter_if")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "enter if" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::WHILE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("Lif_start"));
+					asm_code_list_->Pushback(AsmCode("cmp\teax"));
+					asm_code_list_->Pushback(AsmCode("je\tLwhile_end"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_if")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "exit if" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::WHILE());
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("jmp\tLwhile_start"));
+					asm_code_list_->Pushback(AsmCode("Lwhile_end"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		*/
+		ast_parser_.DefineSyntaxRule("constant")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "constant" << std::endl; 
+				}
+				auto constant = MatchNode(looker, matcher, lexia::TokenType::CONSTANT());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(
+						"\tmov\teax, "+constant->GetWord().ToString()));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
+		ast_parser_.DefineSyntaxRule("variable_reference")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##variable reference!!" << std::endl; }
+				//MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
+				//matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
+				const auto var_token = 
+					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
+				if(!decider()){
+					const auto dec = symbolia::SymbolTable::Resolve(
+						symbol_table_, SymboliaWord(var_token->GetWord()));
+					std::cout << dec << std::endl;
+					var_token->SetKind(Kind::VARIABLE_REFERENCE());
+					var_token->SetDepth(dec.GetDepth());
+					var_token->SetOffset(symbolia::Offset(4));
+					asm_code_list_->Pushback(AsmCode(
+						"\tmov\teax, "
+						+symbolia::OffsetToString(dec.GetSymbol()->GetOffset())+"[ebp]"));
+				}
+				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
+				processor("pattern");
+				return nullptr;
+			}));
+
+		ast_parser_.DefineSyntaxRule("enter_while")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "enter while" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::WHILE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("Lwhile_start"));
+					asm_code_list_->Pushback(AsmCode("cmp\teax"));
+					asm_code_list_->Pushback(AsmCode("je\tLwhile_end"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_while")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){
+					std::cout << "exit while" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::WHILE());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("jmp\tLwhile_start"));
+					asm_code_list_->Pushback(AsmCode("Lwhile_end"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
+		ast_parser_.DefineSyntaxRule("enter_assign")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##enter assign" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::ASSIGN());
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				const auto var_token = 
+					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("enter assign"));
+					current_assigned_symbol_ = symbolia::SymbolTable::Resolve(
+						symbol_table_, SymboliaWord(var_token->GetWord())).GetSymbol();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_assign")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##exit assign" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::ASSIGN());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("exit assign:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(current_assigned_symbol_->GetOffset())
+						+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_add")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##enter add" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::ADD());
+				if(!decider()){
+					/*
+					symbolia::SymbolTable::DefineTempVariable(
+						symbol_table_, symbolia::VariableSize(4));
+					*/
+					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_add")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##pass add" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::ADD());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_add")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##exit add" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::ADD());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
+					asm_code_list_->Pushback(AsmCode("exit:\tadd\teax, temp"));
+					asm_code_list_->Pushback(AsmCode("##free temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
@@ -396,6 +623,118 @@ public:
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("enter_mul")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##enter mul" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::MUL());
+				if(!decider()){
+					/*
+					symbolia::SymbolTable::DefineTempVariable(
+						symbol_table_, symbolia::VariableSize(4));
+					*/
+					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_mul")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##pass mul" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::MUL());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_mul")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##exit mul" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::MUL());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
+					asm_code_list_->Pushback(AsmCode("exit:\timul\teax, temp"));
+					asm_code_list_->Pushback(AsmCode("##free temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_div")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##enter div" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::DIV());
+				if(!decider()){
+					/*
+					symbolia::SymbolTable::DefineTempVariable(
+						symbol_table_, symbolia::VariableSize(4));
+					*/
+					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_div")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##pass div" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::DIV());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_div")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				if(!decider()){ std::cout << "##exit div" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::DIV());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
+					asm_code_list_->Pushback(AsmCode("exit:\tcdq"));
+					asm_code_list_->Pushback(AsmCode("exit:\tidiv\tdword temp"));
+					asm_code_list_->Pushback(AsmCode("##free temp"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
 		ast_parser_.DefineSyntaxRule("exit_function_declaration")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
@@ -408,9 +747,14 @@ public:
 				}
 				MatchNode(looker, matcher, 
 					lexia::TokenType::FUNCTION_DECLARATION());
-				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					symbol_table_.PopScope();
+					const auto return_label = std::string("Lret");
+					asm_code_list_->Pushback(
+						AsmCode(return_label+"\tmov\tesp, ebp"));
+					asm_code_list_->Pushback(AsmCode("\tpop\tebp"));
+					asm_code_list_->Pushback(AsmCode("\tret"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -426,7 +770,7 @@ public:
 					std::cout << "<<<<<<<<exit block: " << std::endl;
 				}
 				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
-				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					symbol_table_.PopScope();
 				}
@@ -446,7 +790,7 @@ public:
 				}
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
-				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				processor("pattern");
 				return nullptr;	
 			}));
@@ -508,7 +852,7 @@ public:
 					const AstParser::SyntaxRule::RuleProcessor& processor,
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
-				return processor("variable_reference");
+				return processor("constant");
 
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
@@ -518,6 +862,137 @@ public:
 					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 					) -> void* {
 				return processor("variable_declaration");
+			}))
+			/*
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_if");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_if");
+			}))
+			*/
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_assign");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_assign");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("variable_reference");
+
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_add");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("pass_add");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_add");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_mul");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("pass_mul");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_mul");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_div");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("pass_div");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_div");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("enter_while");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					const AstParser::SyntaxRule::TokenMatcher& matcher,
+					const AstParser::SyntaxRule::AheadTokenLooker& looker,
+					const AstParser::SyntaxRule::RuleProcessor& processor,
+					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
+					) -> void* {
+				return processor("exit_while");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					const AstParser::SyntaxRule::TokenMatcher& matcher,
@@ -749,8 +1224,7 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement4");
-				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(CreateAst(matcher(lexia::TokenType::IF())));
+				auto cons = CreateAst(matcher(lexia::TokenType::IF()));
 				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
 				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
@@ -766,8 +1240,7 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement5");
-				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(CreateAst(matcher(lexia::TokenType::IF())));
+				auto cons = CreateAst(matcher(lexia::TokenType::IF()));
 				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
 				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
@@ -781,8 +1254,7 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement6");
-				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(CreateAst(matcher(lexia::TokenType::WHILE())));
+				auto cons = CreateAst(matcher(lexia::TokenType::WHILE()));
 				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
 				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
@@ -944,13 +1416,12 @@ public:
 					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##assign_expression1");
 				auto left_id = CreateAst(matcher(lexia::TokenType::IDENTIFIER()));
-				auto eq = CreateAst(matcher(lexia::TokenType::EQUAL()));
+				matcher(lexia::TokenType::EQUAL());
 				auto right_exp = processor("assign_expression");
-				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
 				auto var_ref = CreateAst(lexia::Token::VARIABLE_REFERENCE_TOKEN());
-				cons->AddChild(eq);
-				cons->AddChild(var_ref);
 				var_ref->AddChild(left_id);
+				auto cons = CreateAst(lexia::Token::ASSIGN_TOKEN());
+				cons->AddChild(var_ref);
 				cons->AddChild(right_exp);
 				return cons;
 			}))
@@ -976,17 +1447,16 @@ public:
 				if(!IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
 					return first_exp;
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
+				auto outer_cons = CreateAst(lexia::Token::LOGICAL_OR_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
-					inner_cons->AddChild(
-						CreateAst(matcher(lexia::TokenType::OR())));
+					matcher(lexia::TokenType::OR());
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("logical_and_expression");
 					if(IsTokenTypeSame(looker(1), lexia::TokenType::OR())){
 						auto new_inner_cons = 
-							CreateAst(lexia::Token::CONS_TOKEN());
+							CreateAst(lexia::Token::LOGICAL_OR_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -1007,17 +1477,16 @@ public:
 				if(!IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
 					return first_exp;
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
+				auto outer_cons = CreateAst(lexia::Token::LOGICAL_AND_TOKEN());
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
-					inner_cons->AddChild(
-						CreateAst(matcher(lexia::TokenType::AND())));
+					matcher(lexia::TokenType::AND());
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("equality_expression");
 					if(IsTokenTypeSame(looker(1), lexia::TokenType::AND())){
 						auto new_inner_cons = 
-							CreateAst(lexia::Token::CONS_TOKEN());
+							CreateAst(lexia::Token::LOGICAL_AND_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -1035,27 +1504,31 @@ public:
 					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##equality_expression");
 				auto first_exp = processor("relational_expression");
-				const auto next_token = looker(1);
-				if(!IsTokenTypeSame(next_token, 
-							lexia::TokenType::EQUALEQUAL()) && 
-						!IsTokenTypeSame(next_token, 
-							lexia::TokenType::NOT_EQUAL())){
-					return first_exp;
+				Ast::Ptr outer_cons;
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::EQUALEQUAL())){
+					outer_cons = CreateAst(lexia::Token::EQUALITY_TOKEN());	
+				}else
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::NOT_EQUAL())){
+					outer_cons = CreateAst(lexia::Token::NOT_EQUALITY_TOKEN());
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
+				else{
+					return first_exp;	
+				}
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
 					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("relational_expression");
-					const auto next_token = looker(1);
-					if(IsTokenTypeSame(next_token, 
-							lexia::TokenType::EQUALEQUAL()) || 
-						IsTokenTypeSame(next_token, 
-							lexia::TokenType::NOT_EQUAL())){
+					if(IsTokenTypeSame(looker(1), lexia::TokenType::EQUALEQUAL())){
 						auto new_inner_cons = 
-							CreateAst(lexia::Token::CONS_TOKEN());
+							CreateAst(lexia::Token::EQUALITY_TOKEN());
+						inner_cons->AddChild(new_inner_cons);
+						inner_cons = new_inner_cons;
+					}else
+					if(IsTokenTypeSame(looker(1), lexia::TokenType::NOT_EQUAL())){
+						auto new_inner_cons = 
+							CreateAst(lexia::Token::NOT_EQUALITY_TOKEN());
 						inner_cons->AddChild(new_inner_cons);
 						inner_cons = new_inner_cons;
 					}
@@ -1076,45 +1549,63 @@ public:
 					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##relational_expression");
 				auto first_exp = processor("add_expression");
-				const auto next_token = looker(1);
-				if(!IsTokenTypeSame(next_token, 
-							lexia::TokenType::LOWER_THAN()) && 
-						!IsTokenTypeSame(next_token, 
-							lexia::TokenType::HIGHER_THAN()) && 
-						!IsTokenTypeSame(next_token, 
-							lexia::TokenType::LOWER_EQUAL()) && 
-						!IsTokenTypeSame(next_token, 
-							lexia::TokenType::HIGHER_EQUAL())){
-					return first_exp;
+				Ast::Ptr outer_cons;
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::LOWER_THAN())){	
+					outer_cons = CreateAst(
+						lexia::Token::RELATIONAL_LOWER_THAN_TOKEN());
+				}else
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::HIGHER_THAN())){
+					outer_cons = CreateAst(
+						lexia::Token::RELATIONAL_HIGHER_THAN_TOKEN());
+				}else
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::LOWER_EQUAL())){
+					outer_cons = CreateAst(
+						lexia::Token::RELATIONAL_LOWER_EQUAL_TOKEN());
+				}else
+				if(IsTokenTypeSame(looker(1), lexia::TokenType::HIGHER_EQUAL())){
+					outer_cons = CreateAst(
+						lexia::Token::RELATIONAL_HIGHER_EQUAL_TOKEN());
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
+				else {
+					return first_exp;	
+				}
 				auto inner_cons = outer_cons; 
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
+					matcher(GetType(looker(1)));
 					inner_cons->AddChild(before_exp);
 					before_exp = processor("add_expression");
-					const auto next_token = looker(1);
-					if(IsTokenTypeSame(next_token, 
-								lexia::TokenType::LOWER_THAN()) ||
-							IsTokenTypeSame(next_token, 
-								lexia::TokenType::HIGHER_THAN()) || 
-							IsTokenTypeSame(next_token, 
-								lexia::TokenType::LOWER_EQUAL()) ||
-							IsTokenTypeSame(next_token, 
-								lexia::TokenType::HIGHER_EQUAL())){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
-						inner_cons->AddChild(new_inner_cons);
-						inner_cons = new_inner_cons;
+					Ast::Ptr new_inner_cons;
+					if(IsTokenTypeSame(looker(1), 
+							lexia::TokenType::LOWER_THAN())){	
+						new_inner_cons = CreateAst(
+							lexia::Token::RELATIONAL_LOWER_THAN_TOKEN());
+					}else
+					if(IsTokenTypeSame(looker(1), 
+							lexia::TokenType::HIGHER_THAN())){
+						new_inner_cons = CreateAst(
+							lexia::Token::RELATIONAL_HIGHER_THAN_TOKEN());
+					}else
+					if(IsTokenTypeSame(looker(1), 
+							lexia::TokenType::LOWER_EQUAL())){
+						new_inner_cons = CreateAst(
+							lexia::Token::RELATIONAL_LOWER_EQUAL_TOKEN());
+					}else
+					if(IsTokenTypeSame(looker(1), 
+							lexia::TokenType::HIGHER_EQUAL())){
+						new_inner_cons = CreateAst(
+							lexia::Token::RELATIONAL_HIGHER_EQUAL_TOKEN());
 					}
 					else {
 						inner_cons->AddChild(before_exp);
 						break;	
 					}
+					inner_cons->AddChild(new_inner_cons);
+					inner_cons = new_inner_cons;
 				}	
 				return outer_cons;
 			}));
-
+		
 		lang_parser_.DefineSyntaxRule("add_expression")
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
@@ -1125,32 +1616,43 @@ public:
 				lang_parser_.DebugPrint("##add_expression");
 				auto first_exp = processor("multiply_expression");
 				auto is_add = [](const LangToken& token) -> const bool {
-					return IsTokenTypeSame(token, 
-							lexia::TokenType::PLUS()) ||
-						IsTokenTypeSame(token, 
-							lexia::TokenType::MINUS());
-				};
-				if(!is_add(looker(1))){
+						return IsTokenTypeSame(token, lexia::TokenType::PLUS());
+					};
+				auto is_sub = [](const LangToken& token) -> const bool {
+						return IsTokenTypeSame(token, lexia::TokenType::MINUS());
+					};
+				if(!is_add(looker(1)) && !is_sub(looker(1))){
 					return first_exp;
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
-				auto inner_cons = outer_cons; 
+				Ast::Ptr first_add_cons;
+				if(is_add(looker(1))){
+					first_add_cons = CreateAst(lexia::Token::ADD_TOKEN());
+				}else
+				if(is_sub(looker(1))){
+					first_add_cons = CreateAst(lexia::Token::SUB_TOKEN());	
+				}
+				auto add_cons = first_add_cons;
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
-					inner_cons->AddChild(before_exp);
+					matcher(GetType(looker(1)));
+					add_cons->AddChild(before_exp);
 					before_exp = processor("multiply_expression");
 					if(is_add(looker(1))){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
-						inner_cons->AddChild(new_inner_cons);
-						inner_cons = new_inner_cons;
+						auto new_add_cons = CreateAst(lexia::Token::ADD_TOKEN());
+						add_cons->AddChild(new_add_cons);
+						add_cons = new_add_cons;
+					}else
+					if(is_sub(looker(1))){
+						auto new_add_cons = CreateAst(lexia::Token::SUB_TOKEN());
+						add_cons->AddChild(new_add_cons);
+						add_cons = new_add_cons;
 					}
 					else {
-						inner_cons->AddChild(before_exp);
+						add_cons->AddChild(before_exp);
 						break;	
 					}
 				}
-				return outer_cons;
+				return first_add_cons;
 			}));
 		
 		lang_parser_.DefineSyntaxRule("multiply_expression")
@@ -1162,33 +1664,44 @@ public:
 					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##multiply_expression");
 				auto first_exp = processor("unary_expression");
-				auto is_multiply = [](const LangToken& token) -> const bool {
-					return IsTokenTypeSame(token, 
-							lexia::TokenType::MULTIPLY()) ||
-						IsTokenTypeSame(token, 
-							lexia::TokenType::DIVIDE());
+				auto is_mul = [](const LangToken& token) -> const bool {
+					return IsTokenTypeSame(token, lexia::TokenType::ASTERISK());
 				};
-				if(!is_multiply(looker(1))){
+				auto is_div = [](const LangToken& token) -> const bool {
+					return IsTokenTypeSame(token, lexia::TokenType::SLASH());
+				};
+				if(!is_mul(looker(1)) && !is_div(looker(1))){
 					return first_exp;
 				}
-				auto outer_cons = CreateAst(lexia::Token::CONS_TOKEN());
-				auto inner_cons = outer_cons; 
+				Ast::Ptr first_mul_cons;
+				if(is_mul(looker(1))){
+					first_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
+				}else
+				if(is_div(looker(1))){
+					first_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());	
+				}
+				auto mul_cons = first_mul_cons;
 				auto before_exp = first_exp;
 				while(true){
-					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
-					inner_cons->AddChild(before_exp);
-					before_exp = processor("unary_expression");
-					if(is_multiply(looker(1))){
-						auto new_inner_cons = CreateAst(lexia::Token::CONS_TOKEN());
-						inner_cons->AddChild(new_inner_cons);
-						inner_cons = new_inner_cons;
+					matcher(GetType(looker(1)));
+					mul_cons->AddChild(before_exp);
+					before_exp = processor("multiply_expression");
+					if(is_mul(looker(1))){
+						auto new_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
+						mul_cons->AddChild(new_mul_cons);
+						mul_cons = new_mul_cons;
+					}else
+					if(is_div(looker(1))){
+						auto new_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());
+						mul_cons->AddChild(new_mul_cons);
+						mul_cons = new_mul_cons;
 					}
 					else {
-						inner_cons->AddChild(before_exp);
+						mul_cons->AddChild(before_exp);
 						break;	
 					}
 				}
-				return outer_cons;
+				return first_mul_cons;
 			}));
 		
 		lang_parser_.DefineSyntaxRule("unary_expression")
@@ -1200,9 +1713,8 @@ public:
 					-> const Ast::Ptr {
 				lang_parser_.DebugPrint("##unary_expression");
 				if(IsTokenTypeSame(looker(1), lexia::TokenType::MINUS())){
-					auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-					cons->AddChild(
-						CreateAst(matcher(lexia::TokenType::MINUS())));
+					matcher(lexia::TokenType::MINUS());
+					auto cons = CreateAst(lexia::Token::UNARY_MINUS_TOKEN());
 					cons->AddChild(processor("unary_expression"));
 					return cons;
 				}
