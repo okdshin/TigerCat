@@ -3,6 +3,11 @@
 //#define SEMANTIA_BASIC_TREE_WALKER_DEBUG_ON
 //#define PARSIA_TOKEN_BUFFER_DEBUG_ON
 //#define LEXIA_LEXER_DEBUG_ON
+#define PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS \
+const AstParser::SyntaxRule::TokenMatcher& matcher,\
+const AstParser::SyntaxRule::AheadTokenLooker& looker,\
+const AstParser::SyntaxRule::RuleProcessor& processor,\
+const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 #include <iostream>
 #include "Lexia/Lexer.h"
 #include "Parsia/BasicParser.h"
@@ -82,6 +87,15 @@ auto Expect(const AstParser::SyntaxRule::AheadTokenLooker& looker,
 	if(looker(1).GetType() != type){
 		throw parsia::SyntaxError("ChoiceError");
 	}	
+}
+
+auto CommentAboutTemp(const codia::CodeList::Ptr& code_list, 
+		const symbolia::SymbolTable& table, 
+		const std::string& message) -> void {
+	code_list->Pushback(AsmCode(";"+message+" temp "
+		+symbolia::OffsetToString(
+			symbolia::SymbolTable::TopTempOffset(table))+
+		"[ebp]"));			
 }
 
 class TigerCat{
@@ -182,11 +196,7 @@ public:
 	auto DefineTreePatternForSymbolTable() -> void {
 		ast_parser_.DefineSyntaxRule("variable_declaration")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "##variable declaration!!" << std::endl;
 				}
@@ -241,11 +251,7 @@ public:
 
 		ast_parser_.DefineSyntaxRule("function_declaration")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << ">>>>function declaration!!" << std::endl;
 				}
@@ -336,14 +342,36 @@ public:
 				processor("pattern");
 				return nullptr;
 			}));
+		
+		ast_parser_.DefineSyntaxRule("exit_function_declaration")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "<<<<<<<<exit func_dec: " << std::endl;
+				}
+				MatchNode(looker, matcher, 
+					lexia::TokenType::FUNCTION_DECLARATION());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					const auto min_offset_sum = 
+						symbolia::SymbolTable::GetMinOffsetSum(symbol_table_);
+					std::cout << "cout:" << min_offset_sum << std::endl;
+					asm_code_list_->Pushback(AsmCode(";exit_func:Nlocal="+
+						boost::lexical_cast<std::string>(-min_offset_sum)));
+					symbol_table_.PopScope();
+					const auto return_label = std::string("Lret");
+					asm_code_list_->Pushback(
+						AsmCode(return_label+"\tmov\tesp, ebp"));
+					asm_code_list_->Pushback(AsmCode("\tpop\tebp"));
+					asm_code_list_->Pushback(AsmCode("\tret"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 
 		ast_parser_.DefineSyntaxRule("function_call")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "##function call!!" << std::endl;
 				}
@@ -380,11 +408,7 @@ public:
 		/*
 		ast_parser_.DefineSyntaxRule("enter_if")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "enter if" << std::endl; 
 				}
@@ -400,11 +424,7 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("exit_if")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "exit if" << std::endl;
 				}
@@ -420,16 +440,13 @@ public:
 		*/
 		ast_parser_.DefineSyntaxRule("constant")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "constant" << std::endl; 
 				}
 				auto constant = MatchNode(looker, matcher, lexia::TokenType::CONSTANT());
 				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";constant"));
 					asm_code_list_->Pushback(AsmCode(
 						"\tmov\teax, "+constant->GetWord().ToString()));
 				}
@@ -439,11 +456,7 @@ public:
 
 		ast_parser_.DefineSyntaxRule("variable_reference")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##variable reference!!" << std::endl; }
 				//MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
 				//matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
@@ -468,11 +481,7 @@ public:
 
 		ast_parser_.DefineSyntaxRule("enter_while")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "enter while" << std::endl; 
 				}
@@ -488,11 +497,7 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("exit_while")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "exit while" << std::endl;
 				}
@@ -508,11 +513,7 @@ public:
 
 		ast_parser_.DefineSyntaxRule("enter_assign")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##enter assign" << std::endl; }
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::ASSIGN());
@@ -522,7 +523,7 @@ public:
 				const auto var_token = 
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("enter assign"));
+					asm_code_list_->Pushback(AsmCode(";enter assign"));
 					current_assigned_symbol_ = symbolia::SymbolTable::Resolve(
 						symbol_table_, SymboliaWord(var_token->GetWord())).GetSymbol();
 				}
@@ -531,16 +532,12 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("exit_assign")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##exit assign" << std::endl; }
 				MatchNode(looker, matcher, lexia::TokenType::ASSIGN());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("exit assign:"));
+					asm_code_list_->Pushback(AsmCode(";exit assign:"));
 					asm_code_list_->Pushback(AsmCode("\tmov\t"
 						+symbolia::OffsetToString(current_assigned_symbol_->GetOffset())
 						+"[ebp], eax"));
@@ -550,74 +547,51 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("enter_add")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##enter add" << std::endl; }
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::ADD());
 				if(!decider()){
-					/*
-					symbolia::SymbolTable::DefineTempVariable(
-						symbol_table_, symbolia::VariableSize(4));
-					*/
-					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_add:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 		ast_parser_.DefineSyntaxRule("pass_add")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##pass add" << std::endl; }
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::ADD());
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+					asm_code_list_->Pushback(AsmCode(";pass_add:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 		ast_parser_.DefineSyntaxRule("exit_add")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##exit add" << std::endl; }
 				MatchNode(looker, matcher, lexia::TokenType::ADD());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
-					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
-					asm_code_list_->Pushback(AsmCode("exit:\tadd\teax, temp"));
-					asm_code_list_->Pushback(AsmCode("##free temp"));
-				}
-				processor("pattern");
-				return nullptr;	
-			}));
-		ast_parser_.DefineSyntaxRule("enter_block")
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
-				if(!decider()){
-					std::cout << ">>>>>>>enter block: " << std::endl; 
-				}
-				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
-				if(!decider()){
-					symbol_table_.PushScope(symbolia::BaseScope::Create(
-						symbol_table_.GetCurrentScope()));
+					asm_code_list_->Pushback(AsmCode(";exit_add:"));
+					asm_code_list_->Pushback(AsmCode("\tadd\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
 				processor("pattern");
 				return nullptr;	
@@ -625,66 +599,58 @@ public:
 
 		ast_parser_.DefineSyntaxRule("enter_mul")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##enter mul" << std::endl; }
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::MUL());
 				if(!decider()){
-					/*
-					symbolia::SymbolTable::DefineTempVariable(
-						symbol_table_, symbolia::VariableSize(4));
-					*/
-					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_mul:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 		ast_parser_.DefineSyntaxRule("pass_mul")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##pass mul" << std::endl; }
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::MUL());
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+					asm_code_list_->Pushback(AsmCode(";pass_mul:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 		ast_parser_.DefineSyntaxRule("exit_mul")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##exit mul" << std::endl; }
 				MatchNode(looker, matcher, lexia::TokenType::MUL());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
-					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
-					asm_code_list_->Pushback(AsmCode("exit:\timul\teax, temp"));
-					asm_code_list_->Pushback(AsmCode("##free temp"));
+					asm_code_list_->Pushback(AsmCode(";exit_mul:"));
+					asm_code_list_->Pushback(AsmCode("\timul\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 		ast_parser_.DefineSyntaxRule("enter_div")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##enter div" << std::endl; }
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
@@ -700,11 +666,7 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("pass_div")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##pass div" << std::endl; }
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
@@ -717,11 +679,7 @@ public:
 			}));
 		ast_parser_.DefineSyntaxRule("exit_div")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){ std::cout << "##exit div" << std::endl; }
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
@@ -735,37 +693,25 @@ public:
 				return nullptr;	
 			}));
 
-		ast_parser_.DefineSyntaxRule("exit_function_declaration")
+		ast_parser_.DefineSyntaxRule("enter_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
-					std::cout << "<<<<<<<<exit func_dec: " << std::endl;
+					std::cout << ">>>>>>>enter block: " << std::endl; 
 				}
-				MatchNode(looker, matcher, 
-					lexia::TokenType::FUNCTION_DECLARATION());
-				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::BLOCK());
 				if(!decider()){
-					symbol_table_.PopScope();
-					const auto return_label = std::string("Lret");
-					asm_code_list_->Pushback(
-						AsmCode(return_label+"\tmov\tesp, ebp"));
-					asm_code_list_->Pushback(AsmCode("\tpop\tebp"));
-					asm_code_list_->Pushback(AsmCode("\tret"));
+					symbol_table_.PushScope(symbolia::BaseScope::Create(
+						symbol_table_.GetCurrentScope()));
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
+
 		ast_parser_.DefineSyntaxRule("exit_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << "<<<<<<<<exit block: " << std::endl;
 				}
@@ -780,11 +726,7 @@ public:
 
 		ast_parser_.DefineSyntaxRule("empty_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					std::cout << ">>><<<empty block!!" << std::endl;
 				}
@@ -797,11 +739,7 @@ public:
 		
 		ast_parser_.DefineSyntaxRule("pass")
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
 					if(looker(1).GetValue()){
 						//std::cout << "pass token: " << looker(1) << " " 
@@ -823,207 +761,106 @@ public:
 
 		ast_parser_.DefineSyntaxRule("pattern")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("function_call");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("function_declaration");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_function_declaration");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("constant");
 
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("variable_declaration");
 			}))
 			/*
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_if");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_if");
 			}))
 			*/
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_assign");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_assign");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("variable_reference");
-
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_add");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("pass_add");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_add");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_mul");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("pass_mul");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_mul");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_div");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("pass_div");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_div");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_while");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_while");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("empty_block");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_block");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_block");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
-					const AstParser::SyntaxRule::TokenMatcher& matcher,
-					const AstParser::SyntaxRule::AheadTokenLooker& looker,
-					const AstParser::SyntaxRule::RuleProcessor& processor,
-					const AstParser::SyntaxRule::IsSpeculatingDecider& decider
-					) -> void* {
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("pass");
 			}));
 	}
