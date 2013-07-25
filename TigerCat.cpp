@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 	}
 	std::ifstream ifs(argv[1]);
 #else
-	std::ifstream ifs("test13.tc");
+	std::ifstream ifs("test16.tc");
 #endif
 	if(!ifs){
 		std::cout << "Compiler: "
@@ -51,6 +51,10 @@ int main(int argc, char* argv[])
 		tiger_cat.Compile();
 		std::cout << ast_root->ToString(token2str) << std::endl;
 		tiger_cat.OutputResult(std::cout);
+#ifdef RELEASE_MODE
+		std::ofstream obj_file(std::string(std::string(argv[1])+".nasm").c_str());
+		tiger_cat.OutputResult(obj_file);
+#endif
 	}
 	catch(const lexia::InvalidCharactorError& e){
 		std::cout << "Lexer: " << e.what() << std::endl;

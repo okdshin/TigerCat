@@ -22,6 +22,7 @@ const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 #include "Token.h"
 #include "Codia/Code.h"
 #include "Codia/CodeList.h"
+#include "Codia/LabelStack.h"
 
 namespace tiger_cat
 {
@@ -58,6 +59,14 @@ auto GetType(const LangToken& token) -> const LangTokenType {
 
 auto IsTokenTypeSame(const LangToken& token, const LangTokenType& type) -> const bool {
 	return GetType(token) == type;
+}
+
+auto LookNodeType(
+		const AstParser::SyntaxRule::AheadTokenLooker& looker, int i) -> TokenType {
+	if(looker(i).GetType() == AstTokenType::NODE_TOKEN_TYPE()){
+		return looker(i).GetValue()->GetType();
+	}
+	throw parsia::SyntaxError("SyntaxError");
 }
 
 auto MatchNode(const AstParser::SyntaxRule::AheadTokenLooker& looker, 
@@ -107,8 +116,12 @@ public:
 		ast_root_(),
 		ast_stream_(),
 		ast_parser_(),
-		asm_code_list_(AsmCodeList::Create()){}
-    ~TigerCat(){}
+		asm_code_list_(AsmCodeList::Create()),
+		while_label_stack_(codia::Label("Lwhile")),
+		if_label_stack_(codia::Label("Lif")),
+		else_label_stack_(codia::Label("Lelse")),
+		logical_and_label_stack_(codia::Label("Land")),
+		logical_or_label_stack_(codia::Label("Lor")){}
 
 	auto Define() -> void {
 		DefineLanguageSyntax();
@@ -191,6 +204,13 @@ private:
 	AsmCodeList::Ptr asm_code_list_;
 
 	symbolia::Symbol::Ptr current_assigned_symbol_;
+	symbolia::Symbol::Ptr current_decralated_function_symbol_;
+
+	codia::LabelStack while_label_stack_;
+	codia::LabelStack if_label_stack_;
+	codia::LabelStack else_label_stack_;
+	codia::LabelStack logical_and_label_stack_;
+	codia::LabelStack logical_or_label_stack_;
 
 public:
 	auto DefineTreePatternForSymbolTable() -> void {
@@ -274,6 +294,7 @@ public:
 					function_symbol = symbolia::FunctionSymbol::Create(
 						SymboliaWord(func_token->GetWord()),
 						symbol_table_.GetCurrentScope());
+					current_decralated_function_symbol_ = function_symbol;
 					symbolia::SymbolTable::Define(symbol_table_, 
 						function_symbol, symbolia::VariableSize(0));
 					symbol_table_.PushScope(function_symbol);
@@ -281,11 +302,12 @@ public:
 					asm_code_list_->Pushback(
 						AsmCode("\tGLOBAL "+func_token->GetWord().ToString()));
 					asm_code_list_->Pushback(
-						AsmCode(func_token->GetWord().ToString()+"\tpush\tebp"));
+						AsmCode(func_token->GetWord().ToString()+":\tpush\tebp"));
 					asm_code_list_->Pushback(
 						AsmCode("\tmov\tebp, esp"));
 					asm_code_list_->Pushback(
 						AsmCode("\tsub\tesp, Nlocal"));
+					asm_code_list_->PushCurrentCode();
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::CONS());
@@ -355,13 +377,16 @@ public:
 				if(!decider()){
 					const auto min_offset_sum = 
 						symbolia::SymbolTable::GetMinOffsetSum(symbol_table_);
-					std::cout << "cout:" << min_offset_sum << std::endl;
+					asm_code_list_->ChangeAndPopTopCode(AsmCode("\tsub\tesp, "+
+						boost::lexical_cast<std::string>(-min_offset_sum)));
 					asm_code_list_->Pushback(AsmCode(";exit_func:Nlocal="+
 						boost::lexical_cast<std::string>(-min_offset_sum)));
 					symbol_table_.PopScope();
-					const auto return_label = std::string("Lret");
+					const std::string return_label(
+						current_decralated_function_symbol_->GetWord().ToString()
+						+"_ret");
 					asm_code_list_->Pushback(
-						AsmCode(return_label+"\tmov\tesp, ebp"));
+						AsmCode(return_label+":\tmov\tesp, ebp"));
 					asm_code_list_->Pushback(AsmCode("\tpop\tebp"));
 					asm_code_list_->Pushback(AsmCode("\tret"));
 				}
@@ -405,39 +430,6 @@ public:
 				return nullptr;
 			}));
 
-		/*
-		ast_parser_.DefineSyntaxRule("enter_if")
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				if(!decider()){
-					std::cout << "enter if" << std::endl; 
-				}
-				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::WHILE());
-				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("Lif_start"));
-					asm_code_list_->Pushback(AsmCode("cmp\teax"));
-					asm_code_list_->Pushback(AsmCode("je\tLwhile_end"));
-				}
-				processor("pattern");
-				return nullptr;	
-			}));
-		ast_parser_.DefineSyntaxRule("exit_if")
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				if(!decider()){
-					std::cout << "exit if" << std::endl;
-				}
-				MatchNode(looker, matcher, lexia::TokenType::WHILE());
-				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
-				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("jmp\tLwhile_start"));
-					asm_code_list_->Pushback(AsmCode("Lwhile_end"));
-				}
-				processor("pattern");
-				return nullptr;	
-			}));
-		*/
 		ast_parser_.DefineSyntaxRule("constant")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -479,6 +471,23 @@ public:
 				return nullptr;
 			}));
 
+		ast_parser_.DefineSyntaxRule("exit_return")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "exit return" << std::endl; 
+				}
+				MatchNode(looker, matcher, lexia::TokenType::RETURN());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_return"));
+					const std::string ret_label(
+						current_decralated_function_symbol_->GetWord().ToString()+"_ret");
+					asm_code_list_->Pushback(AsmCode("\tjmp\t"+ret_label));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_while")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -488,9 +497,28 @@ public:
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::WHILE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("Lwhile_start"));
-					asm_code_list_->Pushback(AsmCode("cmp\teax"));
-					asm_code_list_->Pushback(AsmCode("je\tLwhile_end"));
+					asm_code_list_->Pushback(AsmCode(";enter_while"));
+					while_label_stack_.Push();
+					asm_code_list_->Pushback(
+						AsmCode(while_label_stack_.Top().ToString()+"_start:"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_while")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "pass while" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::WHILE());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_while"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						while_label_stack_.Top().ToString()+"_end"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -504,13 +532,138 @@ public:
 				MatchNode(looker, matcher, lexia::TokenType::WHILE());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("jmp\tLwhile_start"));
-					asm_code_list_->Pushback(AsmCode("Lwhile_end"));
+					asm_code_list_->Pushback(AsmCode(";exit_while"));
+					asm_code_list_->Pushback(AsmCode("\tjmp\t"+
+						while_label_stack_.Top().ToString()+"_start:"));
+					asm_code_list_->Pushback(AsmCode(
+						while_label_stack_.Top().ToString()+"_end"));
+					while_label_stack_.Pop();
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("enter_if")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "enter if" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::IF());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";enter_if"));
+					if_label_stack_.Push();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_if")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "pass if" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::IF());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_if"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						if_label_stack_.Top().ToString()+"_end"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_if")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "exit if" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::IF());
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_if"));
+					asm_code_list_->Pushback(AsmCode(
+						if_label_stack_.Top().ToString()+"_end"));
+					if_label_stack_.Pop();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
+		ast_parser_.DefineSyntaxRule("enter_if_with_else")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "enter if with else" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::IF_WITH_ELSE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";enter_if_with_else"));
+					if_label_stack_.Push();
+					else_label_stack_.Push();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_if_with_else")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "pass if with else" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::IF_WITH_ELSE());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_if_with_else"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						else_label_stack_.Top().ToString()+"_start"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_else")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "enter else" << std::endl; 
+				}
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::ELSE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";enter_else"));
+					asm_code_list_->Pushback(AsmCode("\tjmp\t"+
+						if_label_stack_.Top().ToString()+"_end"));
+					asm_code_list_->Pushback(AsmCode(
+						else_label_stack_.Top().ToString()+"_start:"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_if_with_else")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "exit if with else" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::IF_WITH_ELSE());
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_if_with_else"));
+					asm_code_list_->Pushback(AsmCode(
+						if_label_stack_.Top().ToString()+"_end:"));
+					if_label_stack_.Pop();
+					else_label_stack_.Pop();;
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_assign")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -523,7 +676,7 @@ public:
 				const auto var_token = 
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode(";enter assign"));
+					asm_code_list_->Pushback(AsmCode(";enter assign\n;resolve var"));
 					current_assigned_symbol_ = symbolia::SymbolTable::Resolve(
 						symbol_table_, SymboliaWord(var_token->GetWord())).GetSymbol();
 				}
@@ -648,6 +801,7 @@ public:
 				processor("pattern");
 				return nullptr;	
 			}));
+
 		ast_parser_.DefineSyntaxRule("enter_div")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -655,11 +809,10 @@ public:
 				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
 				if(!decider()){
-					/*
-					symbolia::SymbolTable::DefineTempVariable(
-						symbol_table_, symbolia::VariableSize(4));
-					*/
-					asm_code_list_->Pushback(AsmCode("enter:\talloc temp"));
+					asm_code_list_->Pushback(AsmCode(";enter_div:"));
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
 				}
 				processor("pattern");
 				return nullptr;	
@@ -672,7 +825,11 @@ public:
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode("pass:\tmov\ttemp, eax"));
+					asm_code_list_->Pushback(AsmCode(";pass_div:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -684,15 +841,487 @@ public:
 				MatchNode(looker, matcher, lexia::TokenType::DIV());
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
-					//symbolia::SymbolTable::UndefineTempVariable(symbol_table_);
-					asm_code_list_->Pushback(AsmCode("exit:\tcdq"));
-					asm_code_list_->Pushback(AsmCode("exit:\tidiv\tdword temp"));
-					asm_code_list_->Pushback(AsmCode("##free temp"));
+					asm_code_list_->Pushback(AsmCode(";exit_div:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\tebx, "
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp]"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp], eax"));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, ebx"));
+					asm_code_list_->Pushback(AsmCode("\tcdq"));
+					asm_code_list_->Pushback(AsmCode("\tidiv\tdword "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
 				processor("pattern");
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("enter_relational_lower_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##enter relational lower equal" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_EQUAL());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_relational_lower_equal:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_relational_lower_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##pass relational lower equal" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_EQUAL());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_relational_lower_equal:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_relational_lower_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##exit relational lower equal" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_EQUAL());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_relational_lower_equal:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsetle\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_relational_lower_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##enter relational lower than" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_THAN());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_relational_lower_than:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_relational_lower_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##pass relational lower than" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_THAN());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_relational_lower_than:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_relational_lower_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##exit relational lower than" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_LOWER_THAN());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_relational_lower_than:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsetl\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
+		ast_parser_.DefineSyntaxRule("enter_relational_higher_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##enter relational higher equal" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_EQUAL());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_relational_higher_equal:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_relational_higher_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##pass relational higher equal" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_EQUAL());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_relational_higher_equal:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_relational_higher_equal")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##exit relational higher equal" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_EQUAL());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_relational_higher_equal:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsetge\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_relational_higher_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##enter relational higher than" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_THAN());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_relational_higher_than:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_relational_higher_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##pass relational higher than" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_THAN());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_relational_higher_than:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_relational_higher_than")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << 
+					"##exit relational higher than" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::RELATIONAL_HIGHER_THAN());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_relational_higher_than:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsetg\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter equality" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::EQUALITY());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_equality:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass equality" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::EQUALITY());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_equality:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit equality" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::EQUALITY());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_equality:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsete\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_not_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter not equality" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::NOT_EQUALITY());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_not_equality:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_not_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass equality" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::NOT_EQUALITY());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_not_equality:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_not_equality")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit not equality" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::NOT_EQUALITY());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_not_equality:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"[ebp]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tsetne\ta1"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("enter_logical_and")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter logical and" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_AND());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_logical_and:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], 0"));
+					logical_and_label_stack_.Push();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_logical_and")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass logical_and" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_AND());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_logical_and:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						logical_and_label_stack_.Top().ToString()));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_logical_and")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit logical and" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_AND());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_logical_and:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						logical_and_label_stack_.Top().ToString()));
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp], 1"));
+					asm_code_list_->Pushback(
+						AsmCode(logical_and_label_stack_.Top().ToString()));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, "
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp]"));	
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+
+		ast_parser_.DefineSyntaxRule("enter_logical_or")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter logical or" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_OR());
+				if(!decider()){
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					asm_code_list_->Pushback(AsmCode(";enter_logical_or:"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+					+"[ebp], 1"));
+					logical_or_label_stack_.Push();
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_logical_or")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass logical_or" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_OR());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_logical_or:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 1"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						logical_or_label_stack_.Top().ToString()));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_logical_or")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit logical or" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::LOGICAL_OR());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_logical_or:"));
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 1"));
+					asm_code_list_->Pushback(AsmCode("\tje\t"+
+						logical_or_label_stack_.Top().ToString()));
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp], 0"));
+					asm_code_list_->Pushback(
+						AsmCode(logical_or_label_stack_.Top().ToString()));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, "
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"[ebp]"));	
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_block")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -775,22 +1404,11 @@ public:
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("constant");
-
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("variable_declaration");
 			}))
-			/*
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("enter_if");
-			}))
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("exit_if");
-			}))
-			*/
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_assign");
@@ -841,11 +1459,143 @@ public:
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_relational_lower_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_relational_lower_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_relational_lower_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_relational_lower_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_relational_lower_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_relational_lower_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_relational_higher_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_relational_higher_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_relational_higher_equal");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_relational_higher_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_relational_higher_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_relational_higher_than");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_not_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_not_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_not_equality");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_logical_and");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_logical_and");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_logical_and");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_logical_or");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_logical_or");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_logical_or");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_return");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_while");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_while");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_while");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_if");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_if");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_if");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_if_with_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_if_with_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_if_with_else");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -1061,13 +1811,15 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement4");
-				auto cons = CreateAst(matcher(lexia::TokenType::IF()));
+				CreateAst(matcher(lexia::TokenType::IF()));
+				auto cons = CreateAst(lexia::Token::IF_WITH_ELSE_TOKEN());
 				matcher(lexia::TokenType::LEFT_PARENTHESIS());
 				cons->AddChild(processor("expression"));
 				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
 				cons->AddChild(processor("statement"));
-				matcher(lexia::TokenType::ELSE());
-				cons->AddChild(processor("statement"));
+				auto else_node = CreateAst(matcher(lexia::TokenType::ELSE()));
+				else_node->AddChild(processor("statement"));
+				cons->AddChild(else_node);
 				return cons;
 			}))
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
@@ -1116,8 +1868,7 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement8");
-				auto cons = CreateAst(lexia::Token::CONS_TOKEN());
-				cons->AddChild(CreateAst(matcher(lexia::TokenType::RETURN())));
+				auto cons = CreateAst(matcher(lexia::TokenType::RETURN()));
 				cons->AddChild(processor("expression"));
 				matcher(lexia::TokenType::SEMICOLON());
 				return cons;
