@@ -2468,6 +2468,41 @@ public:
 				lang_parser_.DebugPrint("##multiply_expression");
 				auto first_exp = processor("unary_expression");
 				auto is_mul = [](const LangToken& token) -> const bool {
+						return IsTokenTypeSame(token, 
+							lexia::TokenType::ASTERISK());
+					};
+				auto is_div = [](const LangToken& token) -> const bool {
+						return IsTokenTypeSame(token, lexia::TokenType::SLASH());
+					};
+				auto parent = first_exp;
+				while(true){
+					Ast::Ptr new_parent;
+					if(is_mul(looker(1))){
+						new_parent = CreateAst(lexia::Token::MUL_TOKEN());
+					}else
+					if(is_div(looker(1))){
+						new_parent = CreateAst(lexia::Token::DIV_TOKEN());
+					}else{
+						break;	
+					}
+					matcher(GetType(looker(1)));
+					new_parent->AddChild(parent);
+					new_parent->AddChild(processor("unary_expression"));
+					parent = new_parent;
+				}
+				return parent;
+			}));
+			/*
+		lang_parser_.DefineSyntaxRule("multiply_expression")
+			->AddChoice(LangParser::SyntaxRule::Choice([this](
+					const LangParser::SyntaxRule::TokenMatcher& matcher,
+					const LangParser::SyntaxRule::AheadTokenLooker& looker,
+					const LangParser::SyntaxRule::RuleProcessor& processor,
+					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
+					-> const Ast::Ptr {
+				lang_parser_.DebugPrint("##multiply_expression");
+				auto first_exp = processor("unary_expression");
+				auto is_mul = [](const LangToken& token) -> const bool {
 					return IsTokenTypeSame(token, lexia::TokenType::ASTERISK());
 				};
 				auto is_div = [](const LangToken& token) -> const bool {
@@ -2508,7 +2543,7 @@ public:
 				}
 				return first_mul_cons;
 			}));
-		
+		*/
 		lang_parser_.DefineSyntaxRule("unary_expression")
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
