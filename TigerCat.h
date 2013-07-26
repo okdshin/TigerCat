@@ -1069,6 +1069,68 @@ public:
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("enter_rem")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter rem" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::REM());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";enter_rem:"));
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_rem")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass rem" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::REM());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_rem:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_rem")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit rem" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::REM());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_rem:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\tebx, [ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"]"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"], eax"));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, ebx"));
+					asm_code_list_->Pushback(AsmCode("\tcdq"));
+					asm_code_list_->Pushback(AsmCode("\tidiv\tdword [ebp"+
+						symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
+						"]"
+					));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, edx"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_relational_lower_equal")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -1685,6 +1747,18 @@ public:
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_div");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_rem");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_rem");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_rem");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -2427,6 +2501,10 @@ public:
 				auto is_div = [](const LangToken& token) -> const bool {
 						return IsTokenTypeSame(token, lexia::TokenType::SLASH());
 					};
+				auto is_rem = [](const LangToken& token) -> const bool {
+						return IsTokenTypeSame(token, 
+							lexia::TokenType::PERCENT());
+					};
 				Ast::Ptr parent;
 				parent = first_exp;
 				while(true){
@@ -2436,6 +2514,9 @@ public:
 					}else
 					if(is_div(looker(1))){
 						new_parent = CreateAst(lexia::Token::DIV_TOKEN());	
+					}
+					if(is_rem(looker(1))){
+						new_parent = CreateAst(lexia::Token::REM_TOKEN());	
 					}
 					else {
 						break;	
