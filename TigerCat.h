@@ -204,7 +204,8 @@ private:
 
 	AsmCodeList::Ptr asm_code_list_;
 
-	codia::BasicStack<symbolia::Symbol::Ptr> current_assigned_symbol_stack_;
+	codia::BasicStack<symbolia::SymbolWithDepth> 
+		current_assigned_symbol_stack_;
 	codia::BasicStack<symbolia::Symbol::Ptr> current_called_function_symbol_stack_;
 	
 	symbolia::Symbol::Ptr current_decralated_function_symbol_;
@@ -253,21 +254,39 @@ public:
 				}
 				if(!decider()){
 					for(const auto& var_token : var_token_list){
-						auto offset = symbolia::Offset(
-							symbolia::SymbolTable::GetCurrentOffsetSum(
-								symbol_table_)-4);
-						auto variable_symbol = symbolia::VariableSymbol::Create(
-							SymboliaWord(var_token->GetWord()), 
-							offset);
-						symbolia::SymbolTable::Define(symbol_table_,
-							variable_symbol,
-							symbolia::VariableSize(4));
 						var_token->SetKind(Kind::VARIABLE_DECLARATION());
 						var_token->SetDepth(
 							symbol_table_.GetCurrentScope()->GetDepth());
-						var_token->SetOffset(offset);
 						asm_code_list_->Pushback(
 							AsmCode(";variable_declaration"));
+						if(var_token->GetDepth() == 0){
+							asm_code_list_->Pushback(AsmCode("\tcommon\t"+
+								var_token->GetWord().ToString()+"\t4"));	
+							auto offset = symbolia::Offset(
+								symbolia::SymbolTable::GetCurrentOffsetSum(
+									symbol_table_));
+							auto variable_symbol = 
+								symbolia::VariableSymbol::Create(
+									SymboliaWord(var_token->GetWord()), 
+									offset);
+							symbolia::SymbolTable::Define(symbol_table_,
+								variable_symbol,
+								symbolia::VariableSize(0));	
+							var_token->SetOffset(offset);
+						}
+						else {
+							auto offset = symbolia::Offset(
+								symbolia::SymbolTable::GetCurrentOffsetSum(
+									symbol_table_)-4);
+							auto variable_symbol = 
+								symbolia::VariableSymbol::Create(
+									SymboliaWord(var_token->GetWord()), 
+									offset);
+							symbolia::SymbolTable::Define(symbol_table_,
+								variable_symbol,
+								symbolia::VariableSize(4));	
+							var_token->SetOffset(offset);
+						}
 					}
 				}
 				processor("pattern");
@@ -530,9 +549,17 @@ public:
 					var_token->SetOffset(symbolia::Offset(4));
 					asm_code_list_->Pushback(
 						AsmCode(";variable_reference"));
-					asm_code_list_->Pushback(AsmCode(
-						"\tmov\teax, [ebp"
-						+symbolia::OffsetToString(dec.GetSymbol()->GetOffset())+"]"));
+					if(var_token->GetDepth() == 0){
+						asm_code_list_->Pushback(AsmCode(
+							"\tmov\teax, ["+
+							dec.GetSymbol()->GetWord().ToString()+"]"));
+					}
+					else{
+						asm_code_list_->Pushback(AsmCode(
+							"\tmov\teax, [ebp"
+							+symbolia::OffsetToString(dec.GetSymbol()->
+								GetOffset())+"]"));
+					}
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
@@ -746,9 +773,10 @@ public:
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";enter assign\n;resolve var"));
-					current_assigned_symbol_stack_.Push(
+					current_assigned_symbol_stack_.Push(symbolia::SymbolWithDepth(
 						symbolia::SymbolTable::Resolve(symbol_table_, 
-							SymboliaWord(var_token->GetWord())).GetSymbol());
+							SymboliaWord(var_token->GetWord())).GetSymbol(),
+							var_token->GetDepth()));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -761,9 +789,23 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit assign:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
-						+symbolia::OffsetToString(current_assigned_symbol_stack_.Top()->GetOffset())
-						+"], eax"));
+					const auto dec = symbolia::SymbolTable::Resolve(
+						symbol_table_, 
+						current_assigned_symbol_stack_.Top().GetSymbol()->
+							GetWord());
+					if(dec.GetDepth() == 0){
+						asm_code_list_->Pushback(AsmCode("\tmov\t["
+							+current_assigned_symbol_stack_.Top().GetSymbol()->
+								GetWord().ToString()
+							+"], eax"));
+					}
+					else{
+						asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
+							+symbolia::OffsetToString(
+								current_assigned_symbol_stack_.Top().GetSymbol()->
+									GetOffset())
+							+"], eax"));
+					}
 					current_assigned_symbol_stack_.Pop();
 				}
 				processor("pattern");
@@ -883,7 +925,7 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_unary_minus:"));
-					asm_code_list_->Pushback(AsmCode("\timul\teax, -1"));
+					asm_code_list_->Pushback(AsmCode("\tneg\teax"));
 				}
 				processor("pattern");
 				return nullptr;	

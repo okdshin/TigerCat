@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 	}
 	std::ifstream ifs(argv[1]);
 #else
-	std::ifstream ifs("test24.tc");
+	std::ifstream ifs("arith2.tc");
 #endif
 	if(!ifs){
 		std::cout << "Compiler: "
