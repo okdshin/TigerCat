@@ -188,10 +188,6 @@ public:
 		ast_parser_.ProcessRule("pattern");	
 	}
 
-	auto RemoveUselessJumpCommand() -> void {
-		asm_code_list_->RemoveUselessJumpCommand();
-	}
-
 	auto OutputResult(std::ostream& os)const -> void {
 		asm_code_list_->Output(os);
 	}
@@ -263,39 +259,33 @@ public:
 							symbol_table_.GetCurrentScope()->GetDepth());
 						asm_code_list_->Pushback(
 							AsmCode(";variable_declaration"));
-						try{
-							if(var_token->GetDepth() == 0){
-								asm_code_list_->Pushback(AsmCode("\tcommon\t"+
-									var_token->GetWord().ToString()+"\t4"));	
-								auto offset = symbolia::Offset(
-									symbolia::SymbolTable::GetCurrentOffsetSum(
-										symbol_table_));
-								auto variable_symbol = 
-									symbolia::VariableSymbol::Create(
-										SymboliaWord(var_token->GetWord()), 
-										offset);
-								symbolia::SymbolTable::Define(symbol_table_,
-									variable_symbol,
-									symbolia::VariableSize(0));	
-								var_token->SetOffset(offset);
-							}
-							else {
-								auto offset = symbolia::Offset(
-									symbolia::SymbolTable::GetCurrentOffsetSum(
-										symbol_table_)-4);
-								auto variable_symbol = 
-									symbolia::VariableSymbol::Create(
-										SymboliaWord(var_token->GetWord()), 
-										offset);
-								symbolia::SymbolTable::Define(symbol_table_,
-									variable_symbol,
-									symbolia::VariableSize(4));	
-								var_token->SetOffset(offset);
-							}
+						if(var_token->GetDepth() == 0){
+							asm_code_list_->Pushback(AsmCode("\tcommon\t"+
+								var_token->GetWord().ToString()+"\t4"));	
+							auto offset = symbolia::Offset(
+								symbolia::SymbolTable::GetCurrentOffsetSum(
+									symbol_table_));
+							auto variable_symbol = 
+								symbolia::VariableSymbol::Create(
+									SymboliaWord(var_token->GetWord()), 
+									offset);
+							symbolia::SymbolTable::Define(symbol_table_,
+								variable_symbol,
+								symbolia::VariableSize(0));	
+							var_token->SetOffset(offset);
 						}
-						catch(const symbolia::DuplicateDeclarationError& e){
-							std::cout << "\033[1;31m" 
-								<< e.what() << "\033[0;39m" << std::endl;
+						else {
+							auto offset = symbolia::Offset(
+								symbolia::SymbolTable::GetCurrentOffsetSum(
+									symbol_table_)-4);
+							auto variable_symbol = 
+								symbolia::VariableSymbol::Create(
+									SymboliaWord(var_token->GetWord()), 
+									offset);
+							symbolia::SymbolTable::Define(symbol_table_,
+								variable_symbol,
+								symbolia::VariableSize(4));	
+							var_token->SetOffset(offset);
 						}
 					}
 				}
@@ -460,17 +450,8 @@ public:
 						const auto dec = symbolia::SymbolTable::Resolve(
 							symbol_table_, SymboliaWord(fcall_token->GetWord()));
 						std::cout << dec << std::endl;
-						if(dec.GetSymbol()->GetNumOfParameters().ToInt() 
-								!= param_count){
-							std::cout << boost::format(
-								"\033[1;31mNumOfParametersError: " 
-								"function \"%1%\" needs just %2% parameters, " 
-								"but you provided %3% parameters.\033[0;39m") 
-								% dec.GetSymbol()->GetWord().ToString()
-								% dec.GetSymbol()->GetNumOfParameters().ToInt()
-								% param_count
-							<<std::endl;
-							//assert(!"ERROR:num of parameters error");
+						if(dec.GetSymbol()->GetNumOfParameters().ToInt() != param_count){
+							assert(!"ERROR:num of parameters error");
 						}
 						fcall_token->SetKind(Kind::FUNCTION_CALL());
 						fcall_token->SetDepth(dec.GetDepth());
@@ -560,30 +541,24 @@ public:
 				const auto var_token = 
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
-					try{
-						const auto dec = symbolia::SymbolTable::Resolve(
-							symbol_table_, SymboliaWord(var_token->GetWord()));
-						std::cout << dec << std::endl;
-						var_token->SetKind(Kind::VARIABLE_REFERENCE());
-						var_token->SetDepth(dec.GetDepth());
-						var_token->SetOffset(symbolia::Offset(4));
-						asm_code_list_->Pushback(
-							AsmCode(";variable_reference"));
-						if(var_token->GetDepth() == 0){
-							asm_code_list_->Pushback(AsmCode(
-								"\tmov\teax, ["+
-								dec.GetSymbol()->GetWord().ToString()+"]"));
-						}
-						else{
-							asm_code_list_->Pushback(AsmCode(
-								"\tmov\teax, [ebp"
-								+symbolia::OffsetToString(dec.GetSymbol()->
-									GetOffset())+"]"));
-						}
+					const auto dec = symbolia::SymbolTable::Resolve(
+						symbol_table_, SymboliaWord(var_token->GetWord()));
+					std::cout << dec << std::endl;
+					var_token->SetKind(Kind::VARIABLE_REFERENCE());
+					var_token->SetDepth(dec.GetDepth());
+					var_token->SetOffset(symbolia::Offset(4));
+					asm_code_list_->Pushback(
+						AsmCode(";variable_reference"));
+					if(var_token->GetDepth() == 0){
+						asm_code_list_->Pushback(AsmCode(
+							"\tmov\teax, ["+
+							dec.GetSymbol()->GetWord().ToString()+"]"));
 					}
-					catch(const symbolia::NoDeclarationError& e){
-						std::cout << "\033[1;31m" 
-							<< e.what() << "\033[0;39m" << std::endl;
+					else{
+						asm_code_list_->Pushback(AsmCode(
+							"\tmov\teax, [ebp"
+							+symbolia::OffsetToString(dec.GetSymbol()->
+								GetOffset())+"]"));
 					}
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
@@ -2464,17 +2439,15 @@ public:
 				auto is_sub = [](const LangToken& token) -> const bool {
 						return IsTokenTypeSame(token, lexia::TokenType::MINUS());
 					};
-				Ast::Ptr parent;
-				parent = first_exp;
+				auto parent = first_exp;
 				while(true){
 					Ast::Ptr new_parent;
 					if(is_add(looker(1))){
 						new_parent = CreateAst(lexia::Token::ADD_TOKEN());
 					}else
 					if(is_sub(looker(1))){
-						new_parent = CreateAst(lexia::Token::SUB_TOKEN());	
-					}
-					else {
+						new_parent = CreateAst(lexia::Token::SUB_TOKEN());
+					}else{
 						break;	
 					}
 					matcher(GetType(looker(1)));
@@ -2495,39 +2468,47 @@ public:
 				lang_parser_.DebugPrint("##multiply_expression");
 				auto first_exp = processor("unary_expression");
 				auto is_mul = [](const LangToken& token) -> const bool {
-						return IsTokenTypeSame(token, 
-							lexia::TokenType::ASTERISK());
-					};
+					return IsTokenTypeSame(token, lexia::TokenType::ASTERISK());
+				};
 				auto is_div = [](const LangToken& token) -> const bool {
 						return IsTokenTypeSame(token, lexia::TokenType::SLASH());
 					};
-				auto is_rem = [](const LangToken& token) -> const bool {
-						return IsTokenTypeSame(token, 
-							lexia::TokenType::PERCENT());
-					};
 				Ast::Ptr parent;
 				parent = first_exp;
+				if(!is_mul(looker(1)) && !is_div(looker(1))){
+					return first_exp;
+				}
+				Ast::Ptr first_mul_cons;
+				if(is_mul(looker(1))){
+					first_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
+				}else
+				if(is_div(looker(1))){
+					first_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());	
+				}
+				auto mul_cons = first_mul_cons;
+				auto before_exp = first_exp;
 				while(true){
-					Ast::Ptr new_parent;
+					matcher(GetType(looker(1)));
+					mul_cons->AddChild(before_exp);
+					before_exp = processor("multiply_expression");
 					if(is_mul(looker(1))){
-						new_parent = CreateAst(lexia::Token::MUL_TOKEN());
+						auto new_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
+						mul_cons->AddChild(new_mul_cons);
+						mul_cons = new_mul_cons;
 					}else
 					if(is_div(looker(1))){
-						new_parent = CreateAst(lexia::Token::DIV_TOKEN());	
-					}
-					if(is_rem(looker(1))){
-						new_parent = CreateAst(lexia::Token::REM_TOKEN());	
+						auto new_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());
+						mul_cons->AddChild(new_mul_cons);
+						mul_cons = new_mul_cons;
 					}
 					else {
+						mul_cons->AddChild(before_exp);
 						break;	
 					}
-					matcher(GetType(looker(1)));
-					new_parent->AddChild(parent);
-					new_parent->AddChild(processor("unary_expression"));
-					parent = new_parent;
 				}
-				return parent;
+				return first_mul_cons;
 			}));
+		
 		lang_parser_.DefineSyntaxRule("unary_expression")
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,

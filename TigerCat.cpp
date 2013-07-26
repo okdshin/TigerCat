@@ -7,20 +7,15 @@ using namespace tiger_cat;
 
 int main(int argc, char* argv[])
 {
-	bool is_optimize = false;
 #ifdef RELEASE_MODE
-	if(argc!=2 && argc != 3){
+	if(argc!=2){
 		std::cout << "Compiler: " << 
 			"ArgumentError: Please input a source file name." << std::endl;
 		return 0;	
 	}
-	if(argc == 3 && std::string(argv[2]) == "-O"){
-		std::cout << "Optimization true" << std::endl;	
-		is_optimize = true;
-	}
 	std::ifstream ifs(argv[1]);
 #else
-	std::ifstream ifs("test26.tc");
+	std::ifstream ifs("arith2.tc");
 #endif
 	if(!ifs){
 		std::cout << "Compiler: "
@@ -55,9 +50,6 @@ int main(int argc, char* argv[])
 		tiger_cat.DefineTreePatternForSymbolTable();
 		tiger_cat.Compile();
 		std::cout << ast_root->ToString(token2str) << std::endl;
-		if(is_optimize){
-			tiger_cat.RemoveUselessJumpCommand();
-		}
 		tiger_cat.OutputResult(std::cout);
 #ifdef RELEASE_MODE
 		std::ofstream obj_file(std::string(std::string(argv[1])+".asm").c_str());
