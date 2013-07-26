@@ -23,6 +23,7 @@ const AstParser::SyntaxRule::IsSpeculatingDecider& decider
 #include "Codia/Code.h"
 #include "Codia/CodeList.h"
 #include "Codia/LabelStack.h"
+#include "Codia/BasicStack.h"
 
 namespace tiger_cat
 {
@@ -101,10 +102,10 @@ auto Expect(const AstParser::SyntaxRule::AheadTokenLooker& looker,
 auto CommentAboutTemp(const codia::CodeList::Ptr& code_list, 
 		const symbolia::SymbolTable& table, 
 		const std::string& message) -> void {
-	code_list->Pushback(AsmCode(";"+message+" temp "
+	code_list->Pushback(AsmCode(";"+message+" temp [ebp"
 		+symbolia::OffsetToString(
 			symbolia::SymbolTable::TopTempOffset(table))+
-		"[ebp]"));			
+		"]"));			
 }
 
 class TigerCat{
@@ -203,7 +204,9 @@ private:
 
 	AsmCodeList::Ptr asm_code_list_;
 
-	symbolia::Symbol::Ptr current_assigned_symbol_;
+	codia::BasicStack<symbolia::Symbol::Ptr> current_assigned_symbol_stack_;
+	codia::BasicStack<symbolia::Symbol::Ptr> current_called_function_symbol_stack_;
+	
 	symbolia::Symbol::Ptr current_decralated_function_symbol_;
 
 	codia::LabelStack while_label_stack_;
@@ -263,6 +266,8 @@ public:
 						var_token->SetDepth(
 							symbol_table_.GetCurrentScope()->GetDepth());
 						var_token->SetOffset(offset);
+						asm_code_list_->Pushback(
+							AsmCode(";variable_declaration"));
 					}
 				}
 				processor("pattern");
@@ -299,6 +304,8 @@ public:
 						function_symbol, symbolia::VariableSize(0));
 					symbol_table_.PushScope(function_symbol);
 					symbolia::SymbolTable::DebugPrint(symbol_table_);
+					asm_code_list_->Pushback(
+						AsmCode(";function_declaration"));
 					asm_code_list_->Pushback(
 						AsmCode("\tGLOBAL "+func_token->GetWord().ToString()));
 					asm_code_list_->Pushback(
@@ -379,7 +386,8 @@ public:
 						symbolia::SymbolTable::GetMinOffsetSum(symbol_table_);
 					asm_code_list_->ChangeAndPopTopCode(AsmCode("\tsub\tesp, "+
 						boost::lexical_cast<std::string>(-min_offset_sum)));
-					asm_code_list_->Pushback(AsmCode(";exit_func:Nlocal="+
+					asm_code_list_->Pushback(AsmCode(
+						";exit_func_declaration:Nlocal="+
 						boost::lexical_cast<std::string>(-min_offset_sum)));
 					symbol_table_.PopScope();
 					const std::string return_label(
@@ -394,11 +402,11 @@ public:
 				return nullptr;	
 			}));
 
-		ast_parser_.DefineSyntaxRule("function_call")
+		ast_parser_.DefineSyntaxRule("enter_function_call")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
-					std::cout << "##function call!!" << std::endl;
+					std::cout << "##enter function call!!" << std::endl;
 				}
 				matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::FUNCTION_CALL());
@@ -406,25 +414,84 @@ public:
 				const auto fcall_token = 
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::FUNCTION_CALL());
+				//MatchNode(looker, matcher, lexia::TokenType::FUNCTION_CALL());
 				int param_count = 0;
-				if(looker(1).GetType() == 
+				if(looker(2).GetType() == 
 						semantia::TokenType::STEP_DOWN_TOKEN_TYPE()){
+					MatchNode(looker, matcher, lexia::TokenType::FUNCTION_CALL());
 					matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
 					auto param_list_tree = MatchTree(looker, matcher, 
 						lexia::TokenType::PARAMETER_LIST());
 					param_count = param_list_tree->GetNumOfChildren();
 				}
 				if(!decider()){
-					const auto dec = symbolia::SymbolTable::Resolve(
-						symbol_table_, SymboliaWord(fcall_token->GetWord()));
-					std::cout << dec << std::endl;
-					if(dec.GetSymbol()->GetNumOfParameters().ToInt() != param_count){
-						assert(!"ERROR:num of parameters error");
+					asm_code_list_->Pushback(AsmCode(
+						";enter_function_call\n;resolve func"));
+					try{
+						const auto dec = symbolia::SymbolTable::Resolve(
+							symbol_table_, SymboliaWord(fcall_token->GetWord()));
+						std::cout << dec << std::endl;
+						if(dec.GetSymbol()->GetNumOfParameters().ToInt() != param_count){
+							assert(!"ERROR:num of parameters error");
+						}
+						fcall_token->SetKind(Kind::FUNCTION_CALL());
+						fcall_token->SetDepth(dec.GetDepth());
+						//fcall_token->SetOffset(dec.GetSymbol()->GetOffset());
+						current_called_function_symbol_stack_.Push(dec.GetSymbol());
 					}
-					fcall_token->SetKind(Kind::FUNCTION_CALL());
-					fcall_token->SetDepth(dec.GetDepth());
-					//fcall_token->SetOffset(dec.GetSymbol()->GetOffset());
+					catch(const symbolia::NoDeclarationError& e){
+						asm_code_list_->Pushback(AsmCode(";not found"));
+						asm_code_list_->Pushback(AsmCode("\textern\t"+
+							fcall_token->GetWord().ToString()));
+						auto func_sym = 
+							symbolia::FunctionSymbol::Create(symbolia::Word(
+								fcall_token->GetWord().ToString()));
+						func_sym->SetNumOfParameters(
+							symbolia::NumOfParameters(param_count));
+						current_called_function_symbol_stack_.Push(func_sym);
+					}
+				}
+				processor("pattern");
+				return nullptr;
+			}));
+		
+		ast_parser_.DefineSyntaxRule("exit_parameter")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "##exit parameter!!" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::PARAMETER());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_parameter"));
+					asm_code_list_->Pushback(AsmCode("\tpush\teax"));
+				}
+				processor("pattern");
+				return nullptr;
+			}));
+
+		ast_parser_.DefineSyntaxRule("exit_function_call")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){
+					std::cout << "##exit function call!!" << std::endl;
+				}
+				MatchNode(looker, matcher, lexia::TokenType::FUNCTION_CALL());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_function_call"));
+					asm_code_list_->Pushback(AsmCode("\tcall\t"+
+						current_called_function_symbol_stack_.Top()
+							->GetWord().ToString()
+					));
+					asm_code_list_->Pushback(AsmCode("\tadd\tesp, "+
+						boost::lexical_cast<std::string>(
+							current_called_function_symbol_stack_.Top()
+								->GetNumOfParameters().ToInt()*4
+					)));
+
+					current_called_function_symbol_stack_.Pop();
 				}
 				processor("pattern");
 				return nullptr;
@@ -461,9 +528,11 @@ public:
 					var_token->SetKind(Kind::VARIABLE_REFERENCE());
 					var_token->SetDepth(dec.GetDepth());
 					var_token->SetOffset(symbolia::Offset(4));
+					asm_code_list_->Pushback(
+						AsmCode(";variable_reference"));
 					asm_code_list_->Pushback(AsmCode(
-						"\tmov\teax, "
-						+symbolia::OffsetToString(dec.GetSymbol()->GetOffset())+"[ebp]"));
+						"\tmov\teax, [ebp"
+						+symbolia::OffsetToString(dec.GetSymbol()->GetOffset())+"]"));
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
 				MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
@@ -534,9 +603,9 @@ public:
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_while"));
 					asm_code_list_->Pushback(AsmCode("\tjmp\t"+
-						while_label_stack_.Top().ToString()+"_start:"));
+						while_label_stack_.Top().ToString()+"_start"));
 					asm_code_list_->Pushback(AsmCode(
-						while_label_stack_.Top().ToString()+"_end"));
+						while_label_stack_.Top().ToString()+"_end:"));
 					while_label_stack_.Pop();
 				}
 				processor("pattern");
@@ -587,7 +656,7 @@ public:
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_if"));
 					asm_code_list_->Pushback(AsmCode(
-						if_label_stack_.Top().ToString()+"_end"));
+						if_label_stack_.Top().ToString()+"_end:"));
 					if_label_stack_.Pop();
 				}
 				processor("pattern");
@@ -610,17 +679,17 @@ public:
 				processor("pattern");
 				return nullptr;	
 			}));
-		ast_parser_.DefineSyntaxRule("pass_if_with_else")
+		ast_parser_.DefineSyntaxRule("pass_if_of_if_with_else")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				if(!decider()){
-					std::cout << "pass if with else" << std::endl; 
+					std::cout << "pass if of if with else" << std::endl; 
 				}
 				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
-				MatchNode(looker, matcher, lexia::TokenType::IF_WITH_ELSE());
+				MatchNode(looker, matcher, lexia::TokenType::IF_OF_IF_WITH_ELSE());
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
-					asm_code_list_->Pushback(AsmCode(";pass_if_with_else"));
+					asm_code_list_->Pushback(AsmCode(";pass_if_of_if_with_else"));
 					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
 					asm_code_list_->Pushback(AsmCode("\tje\t"+
 						else_label_stack_.Top().ToString()+"_start"));
@@ -677,8 +746,9 @@ public:
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";enter assign\n;resolve var"));
-					current_assigned_symbol_ = symbolia::SymbolTable::Resolve(
-						symbol_table_, SymboliaWord(var_token->GetWord())).GetSymbol();
+					current_assigned_symbol_stack_.Push(
+						symbolia::SymbolTable::Resolve(symbol_table_, 
+							SymboliaWord(var_token->GetWord())).GetSymbol());
 				}
 				processor("pattern");
 				return nullptr;	
@@ -691,9 +761,10 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit assign:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
-						+symbolia::OffsetToString(current_assigned_symbol_->GetOffset())
-						+"[ebp], eax"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
+						+symbolia::OffsetToString(current_assigned_symbol_stack_.Top()->GetOffset())
+						+"], eax"));
+					current_assigned_symbol_stack_.Pop();
 				}
 				processor("pattern");
 				return nullptr;	
@@ -722,10 +793,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_add:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -738,10 +809,10 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_add:"));
-					asm_code_list_->Pushback(AsmCode("\tadd\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tadd\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
@@ -750,6 +821,73 @@ public:
 				return nullptr;	
 			}));
 
+		ast_parser_.DefineSyntaxRule("enter_sub")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##enter sub" << std::endl; }
+				matcher(AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::SUB());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";enter_sub:"));
+					symbolia::SymbolTable::PushTempOffset(symbol_table_, 
+						symbolia::VariableSize(4));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("pass_sub")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##pass sub" << std::endl; }
+				matcher(AstTokenType::STEP_UP_TOKEN_TYPE());
+				MatchNode(looker, matcher, lexia::TokenType::SUB());
+				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";pass_sub:"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"], eax"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_sub")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit sub" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::SUB());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_sub:"));
+					asm_code_list_->Pushback(AsmCode("\tsub\t[ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"], eax"));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, [ebp"
+						+symbolia::OffsetToString(
+							symbolia::SymbolTable::TopTempOffset(symbol_table_))
+						+"]"));
+					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
+					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
+		ast_parser_.DefineSyntaxRule("exit_unary_minus")
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				if(!decider()){ std::cout << "##exit unary minus" << std::endl; }
+				MatchNode(looker, matcher, lexia::TokenType::UNARY_MINUS());
+				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
+				if(!decider()){
+					asm_code_list_->Pushback(AsmCode(";exit_unary_minus:"));
+					asm_code_list_->Pushback(AsmCode("\timul\teax, -1"));
+				}
+				processor("pattern");
+				return nullptr;	
+			}));
 		ast_parser_.DefineSyntaxRule("enter_mul")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -774,10 +912,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_mul:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -790,10 +928,10 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_mul:"));
-					asm_code_list_->Pushback(AsmCode("\timul\teax, "+
+					asm_code_list_->Pushback(AsmCode("\timul\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
@@ -826,10 +964,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_div:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp], eax"));
+						+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -842,20 +980,20 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_div:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\tebx, "
+					asm_code_list_->Pushback(AsmCode("\tmov\tebx, [ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp]"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+						+"]"));
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp], eax"));
+						+"], eax"));
 					asm_code_list_->Pushback(AsmCode("\tmov\teax, ebx"));
 					asm_code_list_->Pushback(AsmCode("\tcdq"));
-					asm_code_list_->Pushback(AsmCode("\tidiv\tdword "+
+					asm_code_list_->Pushback(AsmCode("\tidiv\tdword [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
@@ -890,10 +1028,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_relational_lower_equal:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -907,13 +1045,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_relational_lower_equal:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsetle\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsetge\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -946,10 +1084,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_relational_lower_than:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -963,13 +1101,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_relational_lower_than:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsetl\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsetg\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1003,10 +1141,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_relational_higher_equal:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -1020,13 +1158,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_relational_higher_equal:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsetge\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsetle\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1059,10 +1197,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_relational_higher_than:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -1076,13 +1214,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_relational_higher_than:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsetg\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsetl\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1113,10 +1251,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_equality:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -1129,13 +1267,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_equality:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsete\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsete\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1166,10 +1304,10 @@ public:
 				Expect(looker, AstTokenType::STEP_DOWN_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";pass_not_equality:"));
-					asm_code_list_->Pushback(AsmCode("\tmov\t"
+					asm_code_list_->Pushback(AsmCode("\tmov\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], eax"));
+					+"], eax"));
 				}
 				processor("pattern");
 				return nullptr;	
@@ -1182,13 +1320,13 @@ public:
 				Expect(looker, AstTokenType::STEP_UP_TOKEN_TYPE());
 				if(!decider()){
 					asm_code_list_->Pushback(AsmCode(";exit_not_equality:"));
-					asm_code_list_->Pushback(AsmCode("\tcmp\teax, "+
+					asm_code_list_->Pushback(AsmCode("\tcmp\teax, [ebp"+
 						symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))+
-						"[ebp]"
+						"]"
 					));
-					asm_code_list_->Pushback(AsmCode("\tsetne\ta1"));
-					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, a1"));
+					asm_code_list_->Pushback(AsmCode("\tsetne\tal"));
+					asm_code_list_->Pushback(AsmCode("\tmovzx\teax, al"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1206,10 +1344,10 @@ public:
 						symbolia::VariableSize(4));
 					asm_code_list_->Pushback(AsmCode(";enter_logical_and:"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
-					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], 0"));
+					+"], 0"));
 					logical_and_label_stack_.Push();
 				}
 				processor("pattern");
@@ -1242,16 +1380,16 @@ public:
 					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 0"));
 					asm_code_list_->Pushback(AsmCode("\tje\t"+
 						logical_and_label_stack_.Top().ToString()));
-					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp], 1"));
+						+"], 1"));
 					asm_code_list_->Pushback(
-						AsmCode(logical_and_label_stack_.Top().ToString()));
-					asm_code_list_->Pushback(AsmCode("\tmov\teax, "
+						AsmCode(logical_and_label_stack_.Top().ToString()+":"));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, [ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp]"));	
+						+"]"));	
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1270,10 +1408,10 @@ public:
 						symbolia::VariableSize(4));
 					asm_code_list_->Pushback(AsmCode(";enter_logical_or:"));
 					CommentAboutTemp(asm_code_list_, symbol_table_, "allocate");
-					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-					+"[ebp], 1"));
+					+"], 1"));
 					logical_or_label_stack_.Push();
 				}
 				processor("pattern");
@@ -1306,16 +1444,16 @@ public:
 					asm_code_list_->Pushback(AsmCode("\tcmp\teax, 1"));
 					asm_code_list_->Pushback(AsmCode("\tje\t"+
 						logical_or_label_stack_.Top().ToString()));
-					asm_code_list_->Pushback(AsmCode("\tmov dword\t"
+					asm_code_list_->Pushback(AsmCode("\tmov dword\t[ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp], 0"));
+						+"], 0"));
 					asm_code_list_->Pushback(
-						AsmCode(logical_or_label_stack_.Top().ToString()));
-					asm_code_list_->Pushback(AsmCode("\tmov\teax, "
+						AsmCode(logical_or_label_stack_.Top().ToString()+":"));
+					asm_code_list_->Pushback(AsmCode("\tmov\teax, [ebp"
 						+symbolia::OffsetToString(
 							symbolia::SymbolTable::TopTempOffset(symbol_table_))
-						+"[ebp]"));	
+						+"]"));	
 					CommentAboutTemp(asm_code_list_, symbol_table_, "release");
 					symbolia::SymbolTable::PopTempOffset(symbol_table_); 
 				}
@@ -1391,7 +1529,15 @@ public:
 		ast_parser_.DefineSyntaxRule("pattern")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("function_call");
+				return processor("enter_function_call");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_parameter");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_function_call");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -1432,6 +1578,22 @@ public:
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_add");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_sub");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_sub");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_sub");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_unary_minus");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -1571,6 +1733,22 @@ public:
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_if_with_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("enter_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("pass_if_of_if_with_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
+				return processor("exit_if_with_else");
+			}))
+			->AddChoice(AstParser::SyntaxRule::Choice([this](
+					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("enter_if");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
@@ -1580,22 +1758,6 @@ public:
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
 				return processor("exit_if");
-			}))
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("enter_if_with_else");
-			}))
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("enter_else");
-			}))
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("pass_if_with_else");
-			}))
-			->AddChoice(AstParser::SyntaxRule::Choice([this](
-					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				return processor("exit_if_with_else");
 			}))
 			->AddChoice(AstParser::SyntaxRule::Choice([](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -1811,14 +1973,16 @@ public:
 					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
 					-> const Ast::Ptr { 
 				lang_parser_.DebugPrint("##statement4");
-				CreateAst(matcher(lexia::TokenType::IF()));
-				auto cons = CreateAst(lexia::Token::IF_WITH_ELSE_TOKEN());
+				matcher(lexia::TokenType::IF());
+				auto if_node = CreateAst(lexia::Token::IF_OF_IF_WITH_ELSE_TOKEN());
 				matcher(lexia::TokenType::LEFT_PARENTHESIS());
-				cons->AddChild(processor("expression"));
+				if_node->AddChild(processor("expression"));
 				matcher(lexia::TokenType::RIGHT_PARENTHESIS());
-				cons->AddChild(processor("statement"));
+				if_node->AddChild(processor("statement"));
 				auto else_node = CreateAst(matcher(lexia::TokenType::ELSE()));
 				else_node->AddChild(processor("statement"));
+				auto cons = CreateAst(lexia::Token::IF_WITH_ELSE_TOKEN());
+				cons->AddChild(if_node);
 				cons->AddChild(else_node);
 				return cons;
 			}))
@@ -2102,29 +2266,9 @@ public:
 				else{
 					return first_exp;	
 				}
-				auto inner_cons = outer_cons; 
-				auto before_exp = first_exp;
-				while(true){
-					inner_cons->AddChild(CreateAst(matcher(GetType(looker(1)))));
-					inner_cons->AddChild(before_exp);
-					before_exp = processor("relational_expression");
-					if(IsTokenTypeSame(looker(1), lexia::TokenType::EQUALEQUAL())){
-						auto new_inner_cons = 
-							CreateAst(lexia::Token::EQUALITY_TOKEN());
-						inner_cons->AddChild(new_inner_cons);
-						inner_cons = new_inner_cons;
-					}else
-					if(IsTokenTypeSame(looker(1), lexia::TokenType::NOT_EQUAL())){
-						auto new_inner_cons = 
-							CreateAst(lexia::Token::NOT_EQUALITY_TOKEN());
-						inner_cons->AddChild(new_inner_cons);
-						inner_cons = new_inner_cons;
-					}
-					else {
-						inner_cons->AddChild(before_exp);
-						break;	
-					}
-				}	
+				outer_cons->AddChild(first_exp);
+				matcher(looker(1).GetType());
+				outer_cons->AddChild(processor("relational_expression"));
 				return outer_cons;
 			}));
 
@@ -2157,40 +2301,10 @@ public:
 				else {
 					return first_exp;	
 				}
-				auto inner_cons = outer_cons; 
-				auto before_exp = first_exp;
-				while(true){
-					matcher(GetType(looker(1)));
-					inner_cons->AddChild(before_exp);
-					before_exp = processor("add_expression");
-					Ast::Ptr new_inner_cons;
-					if(IsTokenTypeSame(looker(1), 
-							lexia::TokenType::LOWER_THAN())){	
-						new_inner_cons = CreateAst(
-							lexia::Token::RELATIONAL_LOWER_THAN_TOKEN());
-					}else
-					if(IsTokenTypeSame(looker(1), 
-							lexia::TokenType::HIGHER_THAN())){
-						new_inner_cons = CreateAst(
-							lexia::Token::RELATIONAL_HIGHER_THAN_TOKEN());
-					}else
-					if(IsTokenTypeSame(looker(1), 
-							lexia::TokenType::LOWER_EQUAL())){
-						new_inner_cons = CreateAst(
-							lexia::Token::RELATIONAL_LOWER_EQUAL_TOKEN());
-					}else
-					if(IsTokenTypeSame(looker(1), 
-							lexia::TokenType::HIGHER_EQUAL())){
-						new_inner_cons = CreateAst(
-							lexia::Token::RELATIONAL_HIGHER_EQUAL_TOKEN());
-					}
-					else {
-						inner_cons->AddChild(before_exp);
-						break;	
-					}
-					inner_cons->AddChild(new_inner_cons);
-					inner_cons = new_inner_cons;
-				}	
+				outer_cons->AddChild(first_exp);
+				matcher(looker(1).GetType());
+				outer_cons->AddChild(processor("add_expression"));
+				
 				return outer_cons;
 			}));
 		
@@ -2400,6 +2514,9 @@ public:
 					param_list->AddChild(parameter);
 					parameter->AddChild(processor("assign_expression"));
 				}	
+
+				//REVERSE ARGUMENTS FOR CALLING FUNCTION!!!
+				param_list->ReverseChildren();
 				return param_list;
 			}));
 		

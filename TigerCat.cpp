@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 	}
 	std::ifstream ifs(argv[1]);
 #else
-	std::ifstream ifs("test16.tc");
+	std::ifstream ifs("test24.tc");
 #endif
 	if(!ifs){
 		std::cout << "Compiler: "
@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
 		std::cout << ast_root->ToString(token2str) << std::endl;
 		tiger_cat.OutputResult(std::cout);
 #ifdef RELEASE_MODE
-		std::ofstream obj_file(std::string(std::string(argv[1])+".nasm").c_str());
+		std::ofstream obj_file(std::string(std::string(argv[1])+".asm").c_str());
 		tiger_cat.OutputResult(obj_file);
 #endif
 	}
