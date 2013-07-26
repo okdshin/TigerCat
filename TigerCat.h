@@ -1106,6 +1106,7 @@ public:
 				processor("pattern");
 				return nullptr;	
 			}));
+
 		ast_parser_.DefineSyntaxRule("enter_relational_lower_equal")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
@@ -2474,6 +2475,9 @@ public:
 				auto is_div = [](const LangToken& token) -> const bool {
 						return IsTokenTypeSame(token, lexia::TokenType::SLASH());
 					};
+				auto is_rem = [](const LangToken& token) -> const bool {
+						return IsTokenTypeSame(token, lexia::TokenType::PERCENT());
+					};
 				auto parent = first_exp;
 				while(true){
 					Ast::Ptr new_parent;
@@ -2482,6 +2486,9 @@ public:
 					}else
 					if(is_div(looker(1))){
 						new_parent = CreateAst(lexia::Token::DIV_TOKEN());
+					}else
+					if(is_rem(looker(1))){
+						new_parent = CreateAst(lexia::Token::REM_TOKEN());
 					}else{
 						break;	
 					}
@@ -2492,58 +2499,7 @@ public:
 				}
 				return parent;
 			}));
-			/*
-		lang_parser_.DefineSyntaxRule("multiply_expression")
-			->AddChoice(LangParser::SyntaxRule::Choice([this](
-					const LangParser::SyntaxRule::TokenMatcher& matcher,
-					const LangParser::SyntaxRule::AheadTokenLooker& looker,
-					const LangParser::SyntaxRule::RuleProcessor& processor,
-					const LangParser::SyntaxRule::IsSpeculatingDecider& decider)
-					-> const Ast::Ptr {
-				lang_parser_.DebugPrint("##multiply_expression");
-				auto first_exp = processor("unary_expression");
-				auto is_mul = [](const LangToken& token) -> const bool {
-					return IsTokenTypeSame(token, lexia::TokenType::ASTERISK());
-				};
-				auto is_div = [](const LangToken& token) -> const bool {
-						return IsTokenTypeSame(token, lexia::TokenType::SLASH());
-					};
-				Ast::Ptr parent;
-				parent = first_exp;
-				if(!is_mul(looker(1)) && !is_div(looker(1))){
-					return first_exp;
-				}
-				Ast::Ptr first_mul_cons;
-				if(is_mul(looker(1))){
-					first_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
-				}else
-				if(is_div(looker(1))){
-					first_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());	
-				}
-				auto mul_cons = first_mul_cons;
-				auto before_exp = first_exp;
-				while(true){
-					matcher(GetType(looker(1)));
-					mul_cons->AddChild(before_exp);
-					before_exp = processor("multiply_expression");
-					if(is_mul(looker(1))){
-						auto new_mul_cons = CreateAst(lexia::Token::MUL_TOKEN());
-						mul_cons->AddChild(new_mul_cons);
-						mul_cons = new_mul_cons;
-					}else
-					if(is_div(looker(1))){
-						auto new_mul_cons = CreateAst(lexia::Token::DIV_TOKEN());
-						mul_cons->AddChild(new_mul_cons);
-						mul_cons = new_mul_cons;
-					}
-					else {
-						mul_cons->AddChild(before_exp);
-						break;	
-					}
-				}
-				return first_mul_cons;
-			}));
-		*/
+
 		lang_parser_.DefineSyntaxRule("unary_expression")
 			->AddChoice(LangParser::SyntaxRule::Choice([this](
 					const LangParser::SyntaxRule::TokenMatcher& matcher,
