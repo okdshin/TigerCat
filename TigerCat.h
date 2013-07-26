@@ -188,6 +188,10 @@ public:
 		ast_parser_.ProcessRule("pattern");	
 	}
 
+	auto RemoveUselessJumpCommand() -> void {
+		asm_code_list_->RemoveUselessJumpCommand();	
+	}
+
 	auto OutputResult(std::ostream& os)const -> void {
 		asm_code_list_->Output(os);
 	}
@@ -259,33 +263,39 @@ public:
 							symbol_table_.GetCurrentScope()->GetDepth());
 						asm_code_list_->Pushback(
 							AsmCode(";variable_declaration"));
-						if(var_token->GetDepth() == 0){
-							asm_code_list_->Pushback(AsmCode("\tcommon\t"+
-								var_token->GetWord().ToString()+"\t4"));	
-							auto offset = symbolia::Offset(
-								symbolia::SymbolTable::GetCurrentOffsetSum(
-									symbol_table_));
-							auto variable_symbol = 
-								symbolia::VariableSymbol::Create(
-									SymboliaWord(var_token->GetWord()), 
-									offset);
-							symbolia::SymbolTable::Define(symbol_table_,
-								variable_symbol,
-								symbolia::VariableSize(0));	
-							var_token->SetOffset(offset);
+						try{
+							if(var_token->GetDepth() == 0){
+								asm_code_list_->Pushback(AsmCode("\tcommon\t"+
+									var_token->GetWord().ToString()+"\t4"));	
+								auto offset = symbolia::Offset(
+									symbolia::SymbolTable::GetCurrentOffsetSum(
+										symbol_table_));
+								auto variable_symbol = 
+									symbolia::VariableSymbol::Create(
+										SymboliaWord(var_token->GetWord()), 
+										offset);
+								symbolia::SymbolTable::Define(symbol_table_,
+									variable_symbol,
+									symbolia::VariableSize(0));	
+								var_token->SetOffset(offset);
+							}
+							else {
+								auto offset = symbolia::Offset(
+									symbolia::SymbolTable::GetCurrentOffsetSum(
+										symbol_table_)-4);
+								auto variable_symbol = 
+									symbolia::VariableSymbol::Create(
+										SymboliaWord(var_token->GetWord()), 
+										offset);
+								symbolia::SymbolTable::Define(symbol_table_,
+									variable_symbol,
+									symbolia::VariableSize(4));	
+								var_token->SetOffset(offset);
+							}
 						}
-						else {
-							auto offset = symbolia::Offset(
-								symbolia::SymbolTable::GetCurrentOffsetSum(
-									symbol_table_)-4);
-							auto variable_symbol = 
-								symbolia::VariableSymbol::Create(
-									SymboliaWord(var_token->GetWord()), 
-									offset);
-							symbolia::SymbolTable::Define(symbol_table_,
-								variable_symbol,
-								symbolia::VariableSize(4));	
-							var_token->SetOffset(offset);
+						catch(const symbolia::DuplicateDeclarationError& e){
+							std::cout << "\033[1;31m" 
+								<< e.what() << "\033[0;39m" << std::endl;
 						}
 					}
 				}
@@ -450,8 +460,16 @@ public:
 						const auto dec = symbolia::SymbolTable::Resolve(
 							symbol_table_, SymboliaWord(fcall_token->GetWord()));
 						std::cout << dec << std::endl;
-						if(dec.GetSymbol()->GetNumOfParameters().ToInt() != param_count){
-							assert(!"ERROR:num of parameters error");
+						if(dec.GetSymbol()->GetNumOfParameters().ToInt() 
+								!= param_count){
+							std::cout << boost::format(
+								"\033[1;31mNumOfParametersError: "
+								"function %1% needs just %2% parameters,"
+								"but you provided %3% parameters.\033[0;39m") 
+								% fcall_token->GetWord().ToString()
+								% dec.GetSymbol()->GetNumOfParameters().ToInt()
+								% param_count
+							<< std::endl;
 						}
 						fcall_token->SetKind(Kind::FUNCTION_CALL());
 						fcall_token->SetDepth(dec.GetDepth());
@@ -535,30 +553,36 @@ public:
 		ast_parser_.DefineSyntaxRule("variable_reference")
 			->AddChoice(AstParser::SyntaxRule::Choice([this](
 					PP_AST_PARSER_SYNTAX_RULE_ARGUMENTS) -> void* {
-				if(!decider()){ std::cout << "##variable reference!!" << std::endl; }
-				//MatchNode(looker, matcher, lexia::TokenType::VARIABLE_REFERENCE());
-				//matcher(semantia::TokenType::STEP_DOWN_TOKEN_TYPE());
+				if(!decider()){ 
+					std::cout << "##variable reference!!" << std::endl;
+				}
 				const auto var_token = 
 					MatchNode(looker, matcher, lexia::TokenType::IDENTIFIER());
 				if(!decider()){
-					const auto dec = symbolia::SymbolTable::Resolve(
-						symbol_table_, SymboliaWord(var_token->GetWord()));
-					std::cout << dec << std::endl;
-					var_token->SetKind(Kind::VARIABLE_REFERENCE());
-					var_token->SetDepth(dec.GetDepth());
-					var_token->SetOffset(symbolia::Offset(4));
 					asm_code_list_->Pushback(
 						AsmCode(";variable_reference"));
-					if(var_token->GetDepth() == 0){
-						asm_code_list_->Pushback(AsmCode(
-							"\tmov\teax, ["+
-							dec.GetSymbol()->GetWord().ToString()+"]"));
+					try{
+						const auto dec = symbolia::SymbolTable::Resolve(
+							symbol_table_, SymboliaWord(var_token->GetWord()));
+						std::cout << dec << std::endl;
+						var_token->SetKind(Kind::VARIABLE_REFERENCE());
+						var_token->SetDepth(dec.GetDepth());
+						var_token->SetOffset(symbolia::Offset(4));
+						if(var_token->GetDepth() == 0){
+							asm_code_list_->Pushback(AsmCode(
+								"\tmov\teax, ["+
+								dec.GetSymbol()->GetWord().ToString()+"]"));
+						}
+						else{
+							asm_code_list_->Pushback(AsmCode(
+								"\tmov\teax, [ebp"
+								+symbolia::OffsetToString(dec.GetSymbol()->
+									GetOffset())+"]"));
+						}
 					}
-					else{
-						asm_code_list_->Pushback(AsmCode(
-							"\tmov\teax, [ebp"
-							+symbolia::OffsetToString(dec.GetSymbol()->
-								GetOffset())+"]"));
+					catch(const symbolia::NoDeclarationError& e){
+						std::cout << "\033[1;31m" 
+							<< e.what() << "\033[0;39m" << std::endl;
 					}
 				}
 				matcher(semantia::TokenType::STEP_UP_TOKEN_TYPE());
