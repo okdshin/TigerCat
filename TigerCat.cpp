@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
 		tiger_cat.Compile();
 		std::cout << ast_root->ToString(token2str) << std::endl;
 		if(is_optimize){
-			tiger_cat.RemoveUselessJumpCommand();	
+			tiger_cat.RemoveCommandsAfterJump();	
 		}
 		tiger_cat.OutputResult(std::cout);
 #ifdef RELEASE_MODE

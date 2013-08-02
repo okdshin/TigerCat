@@ -188,8 +188,8 @@ public:
 		ast_parser_.ProcessRule("pattern");	
 	}
 
-	auto RemoveUselessJumpCommand() -> void {
-		asm_code_list_->RemoveUselessJumpCommand();	
+	auto RemoveCommandsAfterJump() -> void {
+		asm_code_list_->RemoveCommandsAfterJump();	
 	}
 
 	auto OutputResult(std::ostream& os)const -> void {
