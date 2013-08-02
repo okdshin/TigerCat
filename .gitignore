@@ -1,0 +1,7 @@
+./Lexia/*
+./Parsia/*
+./Semantia/*
+*.o
+*.out
+*.txt
+*.tc
